@@ -1,0 +1,22 @@
+# Build dir
+build/
+
+# ESP-IDF generated config (per-machine/per-target; sdkconfig.defaults is committed instead)
+sdkconfig
+sdkconfig.old
+
+# ESP-IDF managed component cache (fetched deps, analogous to a lockfile-managed dir)
+managed_components/
+
+# per-project WiFi credentials (real network config, not committed)
+wifi_secrets.h
+
+# vim files
+*.swp
+*~
+
+# Python bytecode cache
+__pycache__/
+
+# personal Claude Code session config, not a project-wide policy worth sharing via commit
+.claude/settings.json

@@ -14,6 +14,27 @@ Key differences from the Pico setup to account for:
 - Toolchain isn't installed via pacman (no ESP32 xtensa cross-compiler exists in Arch's repos); it's fetched by ESP-IDF's own `install.sh` into a tools directory of our choosing.
 - Board enumerates as a USB-serial device (e.g. `/dev/ttyUSB0`), not a debug-probe CDC-ACM port — need `uucp`/`dialout`(Arch: `uucp`) group membership for the device, no udev/VBox passthrough script needed unless this session turns out to run inside a VM (flag if so).
 
+### The board, identified (2026-09-26)
+
+The Amazon listing ("Elegoo ESP-WROOM-32, USB-C") names the seller and the module, not the board design. From the outside in:
+
+| layer | what | source |
+|---|---|---|
+| seller | Elegoo | Amazon listing |
+| board | **ESP32 DEVKITV1**, 30-pin | silkscreen, bottom of board |
+| module | can marked only "ESP-32 / wifi + bt - SoC inside / ISM2.4G 802.11/b/g/n": no module name, no logo, no FCC ID. Probably a third-party module around an Espressif chip. The listing calls it ESP-WROOM-32. | can marking (read by the user) |
+| SoC | **ESP32-D0WD-V3**, revision v3.1, dual core, 240 MHz max | `esptool flash-id` |
+| crystal | 40 MHz | `esptool flash-id`; pinned in each project's `sdkconfig.defaults.esp32` |
+| flash | 4 MB, JEDEC manufacturer `0x5e`, device `0x4016`; 3.3 V (set by a strapping pin) | `esptool flash-id` |
+| USB-UART bridge | Silicon Labs **CP2102** (`10c4:ea60`, driver `cp210x`) | `lsusb`, `udevadm info` |
+| MAC | `8c:94:df:4d:05:50` | `esptool flash-id` |
+
+Notes:
+- "DEVKITV1" is a common clone layout (after the DOIT DevKit V1), not an Espressif board, so pin positions can vary between makers. Check the silkscreen before wiring.
+- Chip revision vs. the module name: as I recall, the original ESP-WROOM-32 used the D0WDQ6 chip, the -32D the D0WD (revision 1), and the -32E the D0WD-V3 (revision 3). This board's revision 3 chip matches Espressif's -32E, but the can's generic marking points to a third-party module. The chip itself is probably genuine: esptool reads its model and revision from the chip's eFuses. Not checked against Espressif's module datasheets.
+- Unverified: which vendor JEDEC ID `0x5e` belongs to (possibly Zbit), and whether the MAC's OUI (`8c:94:df`) is registered to Espressif. Either would say more about where the flash and module came from.
+- To reread any of this: `python -m esptool -p /dev/ttyUSB0 flash-id` (with the ESP-IDF environment exported), then `lsusb`.
+
 ## Approach
 
 ### 1. Shared toolchain tree — `~/dev/esp32/`

@@ -41,4 +41,4 @@ Notes:
 - **ADDR → GND reads 8.6k–9.0k,** a 5% spread against 1% on the pull-ups. The likely cause is a parallel path: ADDR → ESD diode → VCC → LED → GND. It hasn't been confirmed; swapping the leads or reading the SMD code would settle it. ADDR is pulled low on every board either way, so the address is 0x48.
 - **The LED draws current whenever the board is powered** (not yet measured; probably about 1 mA) and makes a little heat near the ADC. It's worth remembering for battery nodes and for thermal work.
 - **Not measured:** VCC → ALRT (only needed if ALERT/RDY is used), and ADDR → GND with the leads swapped.
-- The chip markings are from an earlier check; the memory note says "Chips read BOGI". Confirm that all three boards were checked.
+- Chip markings: the user confirmed BOGI on all three boards (2026-09-26).

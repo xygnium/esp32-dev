@@ -4,11 +4,11 @@
 
 | code | repo / path |
 |---|---|
-| ADS1115 driver, HAL interface (portable) | `ads1115-dev/core/` |
-| ESP-IDF glue for the HAL | `ads1115-dev/ports/esp-idf/` |
+| ADS1115 driver, HAL interface (portable) | `ads1115-dev/ads1115_core/` |
+| ESP-IDF glue for the HAL | `ads1115-dev/ports/ads1115_idf/` |
 | this project: resolution test, later the calibration rig | `esp32-dev/thermistor-cal/` |
 
-`thermistor-cal` pulls in `core/` and `ports/esp-idf/` through `EXTRA_COMPONENT_DIRS`, pointing at the **sibling checkout** `~/dev/github/ads1115-dev` by relative path. No submodule for now. Stage 1j comes back to that question. No code is moved or copied from other repos. Only the three-line build/flash/monitor script pattern is copied from `blink/`.
+`thermistor-cal` pulls in `ads1115_core/` and `ports/ads1115_idf/` through `EXTRA_COMPONENT_DIRS`, pointing at the **sibling checkout** `~/dev/github/ads1115-dev` by relative path. No submodule for now. Stage 1j comes back to that question. No code is moved or copied from other repos. Only the three-line build/flash/monitor script pattern is copied from `blink/`.
 
 ## Goal
 
@@ -34,14 +34,14 @@ ESP-IDF **v6.1** (`~/dev/esp32/esp-idf`, `release/v6.1`). Use the new `driver/i2
 ```
 ~/dev/github/
 ├── ads1115-dev/                 (library repo)
-│   ├── core/
+│   ├── ads1115_core/
 │   │   ├── ads1115.h / .c       register access, single-shot conversion, config
 │   │   └── ads_hal.h            interface a port provides: i2c_write, i2c_read, delay_ms
 │   └── ports/
-│       └── esp-idf/             ESP-IDF component implementing ads_hal.h on i2c_master
+│       └── ads1115_idf/         ESP-IDF component implementing ads_hal.h on i2c_master
 └── esp32-dev/
     └── thermistor-cal/
-        ├── CMakeLists.txt       EXTRA_COMPONENT_DIRS → ../../ads1115-dev/core, ../../ads1115-dev/ports/esp-idf
+        ├── CMakeLists.txt       EXTRA_COMPONENT_DIRS → ../../ads1115-dev/ads1115_core, ../../ads1115-dev/ports/ads1115_idf
         ├── sdkconfig.defaults, main/
         └── build.sh, flash.sh, monitor.sh
 ```
@@ -79,7 +79,7 @@ For each board, record: label, chip marking, pull-up values, ADDR default, timin
 2. **The noise expectation (a few LSB at ±0.256 V, 8 SPS)** hasn't been checked against the datasheet noise table.
 3. **Board pull-ups and ADDR pull-down** are assumed. Stage 1b measures them.
 4. **The ESP32 internal pull-ups** are weak. D21 measured at **about 77k** (Thévenin estimate; see `BOARDS.md`), not the ~45k recalled. If 1b finds no board pull-ups, add 4.7k–10k before 1c.
-5. **`core/` and `ports/esp-idf/` as separate component directories:** the ESP-IDF side is settled in 1a. The Pico side (pico-dev `temp-sense`) isn't tested until later.
+5. **`ads1115_core/` and `ports/ads1115_idf/` (renamed from `core/`, `ports/esp-idf/` on 2026-09-30) as separate component directories:** the ESP-IDF side is settled in 1a. The Pico side (pico-dev `temp-sense`) isn't tested until later.
 6. **Pin positions on the 30-pin board** come from the standard layout. Check the silkscreen.
 7. **Timing-check figures (1d)** are recalled and haven't been checked against the datasheets: the ADS1015 data-rate table (DR=000 → 128 SPS), the ADS1115 oscillator tolerance (about ±10%, which sets the 110–140 ms window), and whether OS reads 0 immediately after the start write.
 8. **Sibling path:** there's no record of which `ads1115-dev` commit an `esp32-dev` build used. If that matters before 1j, note the library commit hash in `BOARDS.md` alongside results.

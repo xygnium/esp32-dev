@@ -4,8 +4,8 @@ cmake_minimum_required(VERSION 3.22)
 
 # ads1115-dev is a sibling checkout (see PLAN-stage1-resolution-test.md, stage 1j)
 set(EXTRA_COMPONENT_DIRS
-    ${CMAKE_CURRENT_LIST_DIR}/../../ads1115-dev/core
-    ${CMAKE_CURRENT_LIST_DIR}/../../ads1115-dev/ports/esp-idf)
+    ${CMAKE_CURRENT_LIST_DIR}/../../ads1115-dev/ads1115_core
+    ${CMAKE_CURRENT_LIST_DIR}/../../ads1115-dev/ports/ads1115_idf)
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(thermistor-cal)

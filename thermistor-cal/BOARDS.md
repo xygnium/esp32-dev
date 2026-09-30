@@ -42,3 +42,13 @@ Notes:
 - **The LED draws current whenever the board is powered** (not yet measured; probably about 1 mA) and makes a little heat near the ADC. It's worth remembering for battery nodes and for thermal work.
 - **Not measured:** VCC → ALRT (only needed if ALERT/RDY is used), and ADDR → GND with the leads swapped.
 - Chip markings: the user confirmed BOGI on all three boards (2026-09-26).
+
+## ADS1115 boards: stage 1c (wired, scan), 2026-09-30
+
+Wiring: VCC → 3V3, GND → GND, SDA → D21, SCL → D22, ADDR left at the board default. Firmware: the stage 1a scan build, unchanged (app version `b9c7d3a-dirty`; it had not been rebuilt since 1a). The ESP32's internal pull-ups are in parallel with the board's 10k.
+
+| board | power LED | scan result | verdict |
+|---|---|---|---|
+| ADS-A | lit | `0x48 (found 1, timeouts 0)`, same on repeated scans | pass |
+| ADS-B | — | — | pending (1i) |
+| ADS-C | — | — | pending (1i) |

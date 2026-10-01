@@ -84,3 +84,42 @@ Notes:
 - **0x8583 at boot is the true power-on value:** the board had only run the scan firmware, which never writes Config.
 - **Differences from the plan:** the sweep repeats every 5 s instead of once, and a general-call reset runs before the second Config read (the ADS keeps its settings across an ESP32 reset).
 - **Still unchecked against datasheets:** the ADS1015 rate table and the ADS1115 clock tolerance. The ADS1115 rate table is borne out: all eight codes fit one line.
+
+## ADS1115 boards: stage 1e (pot on A0), 2026-10-01
+
+Test input: a 10k linear-taper (B) pot, 210° of travel. Outer legs to 3V3 and GND, center (wiper) to A0. Which meter took these readings wasn't recorded.
+
+| measurement | value |
+|---|---|
+| pot unpowered, sweep | 8.6k to 2.8 Ω |
+| center to GND, powered, A0 not yet connected | 0 to 3.28 V |
+| verdict | pass |
+
+8.6k is inside the usual ±20% tolerance for a 10k pot. The wiper never looks like more than about a quarter of that (2.2k) to A0.
+
+## ADS1115 boards: stage 1f (resolution), 2026-10-01
+
+Firmware: stage 1f test (`main/main.c`), ads1115-dev at `5bbca3c`. Single-shot conversions of A0 at 8 readings per second on the ±4.096 V range (1 step = 125 µV). I2C at 100 kHz.
+
+**What it shows:** an ADS1015 has 16 times coarser steps, so on this scale it can only give multiples of 16: never an odd code, and the low four bits always 0. An ADS1115 gives every code.
+
+| board | Config after a conversion | readings | range | odd codes | distinct codes | verdict |
+|---|---|---|---|---|---|---|
+| ADS-A | 0xc303 | 691 in 90 s, 0 errors | 0 to 26474 (0 to 3.309 V) | 330 | 455 | **16-bit, ADS1115** |
+| ADS-B | — | — | — | — | — | pending (1i) |
+| ADS-C | — | — | — | — | — | pending (1i) |
+
+ADS-A, count of readings by low four bits, pot turned by hand end to end and back several times:
+
+| 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | a | b | c | d | e | f |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 94 | 33 | 35 | 25 | 22 | 24 | 26 | 34 | 32 | 123 | 94 | 36 | 30 | 27 | 28 | 28 |
+
+Notes:
+- **The three tall bins are the end stops.** Bin 0 holds 62 readings of exactly 0 (pot parked at GND); bins 9 and a are the pot parked at full turn, codes 26473 and 26474. Away from the stops the bins are even.
+- **Parked at full turn the reading flickers by one step** (26473/26474) and no more. That's a first look at noise on this range; 1h measures it properly on the ±0.256 V range.
+- **Scale check:** full turn reads 3.309 V against 3.28 V on the meter, about 1% apart. The SC260 read this rail at 3.31 V in stage 1a.
+- **The Config read-back 0xc303** is the value written with the "start" bit showing "idle": A0 against GND, ±4.096 V, single-shot, 8 per second, comparator off. Those field codes are recalled, not checked against the datasheet; the read-back and the scale check both bear them out.
+- **Bottom end reads exactly 0.** The 2.8 Ω stop resistance predicts about 1 mV (8 steps). Not explained; some of the 2.8 Ω may have been meter leads.
+- **Reading rate:** about 130 ms per reading (128 ms conversion, checked for "done" every 10 ms).
+- **Difference from the plan:** each reading also prints hex and microvolts; summaries come every 40 readings.

@@ -123,3 +123,36 @@ Notes:
 - **Bottom end reads exactly 0.** The 2.8 Ω stop resistance predicts about 1 mV (8 steps). Not explained; some of the 2.8 Ω may have been meter leads.
 - **Reading rate:** about 130 ms per reading (128 ms conversion, checked for "done" every 10 ms).
 - **Difference from the plan:** each reading also prints hex and microvolts; summaries come every 40 readings.
+
+## ADS1115 boards: stages 1g, 1h (noise and zero), 2026-10-01
+
+Firmware: stage 1h noise test (`main/main.c` with `TEST_NOISE 1`), ±0.256 V range (1 step = 7.8 µV), 8 readings per second, blocks of 100. The runs against ground used ads1115-dev `5bbca3c`; the A0-minus-A1 runs used `814588c`. I2C at 100 kHz.
+
+Wiring (1g): pot removed. The ADS board's GND, the ESP32's GND and the A0 jumper all land on one breadboard ground bus. With the 1f firmware still running, A0 on that bus read code −1 (−125 µV on the ±4.096 V range) on every reading.
+
+ADS-A:
+
+| input arrangement | Config | blocks | mean (steps) | mean (µV) | spread | std dev (steps) |
+|---|---|---|---|---|---|---|
+| A0 to the ground bus, read against ground | 0xcb03 | 4 | −10.81 to −10.89 | −85 | 1 step | 0.31–0.39 |
+| same, jumper moved 3 cm closer to the board along the bus | 0xcb03 | 3 | −10.28 to −10.32 | −80.5 | 1 step | 0.45–0.47 |
+| A0 to A1, pair floating, read as A0 minus A1 | 0x8b03 | 3 | 0.00 | 0.0 | 0 | 0.00 |
+| A0 to A1, A1 to the ground bus, read as A0 minus A1 | 0x8b03 | 3 | 0.00 | 0.0 | 0 | 0.00 |
+
+No conversion errors in any block.
+
+| board | noise floor (±0.256 V, 8 per second) | converter zero error | verdict |
+|---|---|---|---|
+| ADS-A | spread of 1 step (7.8 µV) or less | under 1 step | pass |
+| ADS-B | — | — | pending (1i) |
+| ADS-C | — | — | pending (1i) |
+
+Notes:
+- **The noise is smaller than one step.** Against ground the readings split between two neighbouring codes (−11 and −10); as a difference they were all 0. So the standard deviation mostly reflects where the mean sits between two codes, not the true noise. It rose after the 3 cm move only because the mean moved nearer the middle.
+- **The −80 µV is in the ground path, not the converter.** Read as a difference between two inputs, the zero is exact.
+- **Likely cause: the ADS board's own ground lead.** The board's supply current (power LED plus chip, probably a little over 1 mA, not measured) returns through its ground wire to the bus. That lifts the chip's ground above the bus, so an input tied to the bus reads negative. 80 µV at about 1.2 mA is roughly 0.07 Ω: a jumper wire and two breadboard contacts. The 3 cm of bus accounted for about 4 µV. The ground trace on the ADS board itself may also contribute; these tests don't separate it from the wire.
+- **Slow drift isn't ruled out** as part of the 4 µV change: the two runs were a few minutes apart.
+- **For the thermistor rig:** take ground references at the ADS board, not at a shared bus, or read as a difference between two inputs. This offset depends on wiring, so repeat this test after the move to perf board; the chip checks (1b, 1d, 1f) don't need repeating.
+- **Not yet shown:** that the A0-minus-A1 setting responds to a real voltage. All-zero readings fit a quiet chip with a shorted input, but would also fit a dead channel.
+- **Differences from the plan:** 1h reports standard deviation as well as mean, min/max and spread, and repeats every block. The A0-minus-A1 runs were added to find the source of the offset. `main.c` keeps the 1f test too, chosen with `TEST_NOISE`; `NOISE_MUX` picks the noise test's input.
+- **Field codes** for the ±0.256 V range and A0-minus-A1 are recalled, not checked against the datasheet. The Config read-backs match what was written, and the −85 µV here agrees with the −1 step seen on the ±4.096 V range.

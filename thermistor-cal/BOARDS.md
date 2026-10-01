@@ -52,3 +52,35 @@ Wiring: VCC → 3V3, GND → GND, SDA → D21, SCL → D22, ADDR left at the boa
 | ADS-A | lit | `0x48 (found 1, timeouts 0)`, same on repeated scans | pass |
 | ADS-B | — | — | pending (1i) |
 | ADS-C | — | — | pending (1i) |
+
+## ADS1115 boards: stage 1d (Config read + timing), 2026-09-30
+
+Firmware: stage 1d test (`main/main.c`), ads1115-dev at `d114198`. I2C at 100 kHz. Same wiring as 1c; A0 not connected (timing doesn't depend on the input).
+
+**What it shows:** the real ADS1115 (about 65,000 steps) and its cheaper sister, the ADS1015 (about 4,000 steps), differ in speed. At the slowest setting the ADS1115 takes about 1/8 s per reading; the ADS1015 about 1/128 s. Timing is the quick check; the step size itself is shown in 1f.
+
+| board | Config at boot | Config after general-call reset | DR 000 time | verdict |
+|---|---|---|---|---|
+| ADS-A | 0x8583 | 0x8583 | 128.3 ms | **ADS1115** |
+| ADS-B | — | — | — | pending (1i) |
+| ADS-C | — | — | — | pending (1i) |
+
+ADS-A, all eight speed settings (three passes, identical poll counts each time):
+
+| DR | measured | ADS1115 nominal | ADS1015 nominal |
+|---|---|---|---|
+| 000 | 128.3 ms | 125 ms | 7.8 ms |
+| 001 | 64.4 ms | 62.5 ms | 4.0 ms |
+| 010 | 32.6 ms | 31.3 ms | 2.0 ms |
+| 011 | 16.7 ms | 15.6 ms | 1.1 ms |
+| 100 | 8.7 ms | 7.8 ms | 0.63 ms |
+| 101 | 4.8 ms | 4.0 ms | 0.42 ms |
+| 110 | 2.8 ms | 2.1 ms | 0.30 ms |
+| 111 | 1.6 ms | 1.2 ms | 0.30 ms |
+
+Notes:
+- **The chip's own clock runs about 2.1% slow** (±0.3%): measured ≈ 1.0215 × nominal + 0.63 ms across all eight codes.
+- **The 0.63 ms extra is the stopwatch, not the chip.** Each "done yet?" check takes about 0.4 ms, so every time is a whole number of checks. That's why the fast settings look proportionally long, and why the passes repeat exactly.
+- **0x8583 at boot is the true power-on value:** the board had only run the scan firmware, which never writes Config.
+- **Differences from the plan:** the sweep repeats every 5 s instead of once, and a general-call reset runs before the second Config read (the ADS keeps its settings across an ESP32 reset).
+- **Still unchecked against datasheets:** the ADS1015 rate table and the ADS1115 clock tolerance. The ADS1115 rate table is borne out: all eight codes fit one line.

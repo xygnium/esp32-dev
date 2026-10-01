@@ -87,7 +87,7 @@ Notes:
 
 ## ADS1115 boards: stage 1e (pot on A0), 2026-10-01
 
-Test input: a 10k linear-taper (B) pot, 210° of travel. Outer legs to 3V3 and GND, center (wiper) to A0. Which meter took these readings wasn't recorded.
+Test input: a 10k linear-taper (B) pot, 210° of travel. Outer legs to 3V3 and GND, center (wiper) to A0. Meter: Klein MM400.
 
 | measurement | value |
 |---|---|
@@ -118,7 +118,7 @@ ADS-A, count of readings by low four bits, pot turned by hand end to end and bac
 Notes:
 - **The three tall bins are the end stops.** Bin 0 holds 62 readings of exactly 0 (pot parked at GND); bins 9 and a are the pot parked at full turn, codes 26473 and 26474. Away from the stops the bins are even.
 - **Parked at full turn the reading flickers by one step** (26473/26474) and no more. That's a first look at noise on this range; 1h measures it properly on the ±0.256 V range.
-- **Scale check:** full turn reads 3.309 V against 3.28 V on the meter, about 1% apart. The SC260 read this rail at 3.31 V in stage 1a.
+- **Scale check:** full turn reads 3.309 V against 3.28 V on the Klein MM400, about 1% apart. The SC260 read this rail at 3.31 V in stage 1a.
 - **The Config read-back 0xc303** is the value written with the "start" bit showing "idle": A0 against GND, ±4.096 V, single-shot, 8 per second, comparator off. Those field codes are recalled, not checked against the datasheet; the read-back and the scale check both bear them out.
 - **Bottom end reads exactly 0.** The 2.8 Ω stop resistance predicts about 1 mV (8 steps). Not explained; some of the 2.8 Ω may have been meter leads.
 - **Reading rate:** about 130 ms per reading (128 ms conversion, checked for "done" every 10 ms).

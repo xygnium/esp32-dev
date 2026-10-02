@@ -35,6 +35,22 @@ Notes:
 - Unverified: which vendor JEDEC ID `0x5e` belongs to (possibly Zbit), and whether the MAC's OUI (`8c:94:df`) is registered to Espressif. Either would say more about where the flash and module came from.
 - To reread any of this: `python -m esptool -p /dev/ttyUSB0 flash-id` (with the ESP-IDF environment exported), then `lsusb`.
 
+### The three boards (2026-10-02)
+
+Labels are paint-pen dots on each board: 1, 2 or 3 dots.
+
+| dots | MAC | SoC | crystal | flash | USB-UART | blink | use |
+|---|---|---|---|---|---|---|---|
+| 1 | `8c:94:df:4d:05:50` | ESP32-D0WD-V3 v3.1 | 40 MHz | `0x5e`/`0x4016`, 4 MB, 3.3 V | CP210x | pass (2026-09-26) | bench: thermistor-cal (ADS-A) |
+| 2 | `30:76:f5:92:5d:84` | ESP32-D0WD-V3 v3.1 | 40 MHz | `0x5e`/`0x4016`, 4 MB, 3.3 V | CP210x | pass | perf-board ambient logger |
+| 3 | `8c:94:df:46:43:b4` | ESP32-D0WD-V3 v3.1 | 40 MHz | `0x5e`/`0x4016`, 4 MB, 3.3 V | CP210x | pass | spare |
+
+Notes:
+- Board 2's MAC starts with a different maker prefix (`30:76:f5`) from boards 1 and 3 (`8c:94:df`). The chip, crystal and flash are the same, so the difference may only be a different production batch. Not checked.
+- Boards 2 and 3: seller and bottom silkscreen not yet recorded.
+- Board 3's first `flash-id` misread the crystal (15.55 MHz) and the stub flasher didn't start. Two retries were clean. Board 1 had a similar one-off failure at its first flash. Put down to the serial link through the VM.
+- Serial captures in this VM can replay one old chunk of output many times when the port opens (identical lines, same timestamp). On board 2 this replayed the boot banner and looked like a reset loop; it wasn't.
+
 ## Approach
 
 ### 1. Shared toolchain tree — `~/dev/esp32/`

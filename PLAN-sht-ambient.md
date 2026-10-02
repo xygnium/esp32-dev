@@ -23,7 +23,7 @@ Development goes in **stages, each introducing exactly one new unknown**. A wiri
 - **Pressure:** BMP388 on I2C bus 0. Compensation math from Bosch's BMP3 sensor API rather than our own.
 - **Code reuse: copy first, share later.** The temp-sense storage and transfer code (`sd_ring`, `xfer_proto`, `xfer_session`, `config_store`, `crc32`, DS3231 driver) is copied into `ambient/` and adapted until the ESP32 logs and the collector pulls from it. Only after both loggers work is the common part extracted into a shared library repo (core + per-board ports, like ads1115-dev). The extraction is a separate step, never bundled with new work, and the Pico is re-checked on hardware afterward. Reason: the ambient record layout differs (finer temperature steps, pressure), and the real boundary between common and board-specific code is only visible once two working copies exist. Cost: fixes must be made in both copies by hand until then.
 - **Outdoor:** three parts: wall charger, warm box, open box (see Wiring plan, Production). The SHT45 sits in its own open box on a cable (≤ ~1 m) away from the warm box's heat; the open box must let outside air move freely past the membrane. The SHT45 heater runs when RH stays above ~95%, and readings are `valid=0` while it recovers.
-- **Always on** (grid power), no sleep modes.
+- **Always on** (grid power), no sleep modes. Solar is a possible later add-on (see Future: solar power); the firmware keeps sampling, SD writing and WiFi as separate steps so sleep can be added without a rewrite.
 
 ## Wiring plan
 
@@ -164,7 +164,7 @@ Each stage lists what's **new** and its **pass check**. Don't start the next sta
 | 19 | **wiring:** SHT45-PTFE on bus 0, short leads | i2c-scan | 0x44 + 0x68 + 0x77 |
 | 20 | **code:** `ambient` sample loop: SHT45 + BMP388 on a timer, stamped from the DS3231, printed on serial only; interval settable by command (seconds for calibration runs, normal outdoor rate otherwise) | stage-19 wiring | plausible T/RH/pressure at the set interval; timestamps match the clock; switching to a few-second interval and back works without a reflash |
 | 21 | **code:** record format + SD ring (copied from temp-sense, adapted) | stage-20 node | records persist across reboot; sequence numbers continue, no repeats |
-| 22 | **code:** download protocol (copied `xfer_proto`/`xfer_session`) + collector.py support (pico-dev repo) | stage-21 node | one-shot collector run pulls every record; ESP32 cut off from WiFi for an hour, then the backlog arrives with no gaps; Pico pull unaffected |
+| 22 | **code:** download protocol (copied `xfer_proto`/`xfer_session`) + collector.py support (pico-dev repo) | stage-21 node | **Decision point:** copying temp-sense means the collector starts every transfer, which needs the node always awake; fine on the wall charger, but solar with sleep would need set wake times or a node-started transfer. Choose deliberately here. Pass: one-shot collector run pulls every record; ESP32 cut off from WiFi for an hour, then the backlog arrives with no gaps; Pico pull unaffected |
 | 23 | **wiring:** 1 m outdoor cable to the SHT45, on the bench | stage-22 code | hours of logging with zero `valid=0` on the SHT45. If there are errors, drop to 50 kHz |
 | 24 | **code:** heater logic (RH > 95% sustained) | bench | `heat` pulse visible as a temp spike; next readings marked invalid, then recover |
 | 25 | install outdoors; collector on dev10 rebuilt with ambient support (manual on dev10) | — | ambient records arrive every collector cycle, backlog drains after outages |
@@ -178,6 +178,22 @@ The ambient logger is the barometer for the thermistor boiling-point calibration
 - **Where:** indoors, on a calm, settled-weather day, with range hood, bath fan, dryer and furnace blower off. The vessel stays open. The ambient logger sits on the counter in the same room on any USB charger, at roughly pot height (1 m of height ≈ 0.003 °C). No outdoor boil and no extra portability needed; indoor/outdoor and fan-effect checks were considered and skipped.
 - **Sampling:** the ambient logger runs at a few seconds per reading during the boil (stage 20's settable interval), then goes back to its normal rate.
 - **Matching readings:** thermistor readings are matched to pressure readings by time. Either the thermistor rig's readings carry timestamps from a clock set from the same source as the ambient logger's DS3231, or the two are run side by side and lined up by a shared start mark. Which one is decided when the thermistor reading stage is planned.
+
+## Future: solar power (optional)
+
+Not a site need; interest in renewable power. The wall charger stays the main supply. Steps, only after the logger runs on the wall charger:
+
+1. **Measure** the logger's current, awake (WiFi on) and asleep, on the bench. This replaces the estimates below.
+2. **Size** the panel and battery from those numbers.
+3. **Build** a small solar setup (panel, charge controller with low-voltage load disconnect, battery, 12 V → 5 V step-down converter such as a car USB charger) feeding the same USB cable. Run it beside the wall-charger data through cloudy stretches.
+
+Design notes:
+- Never feed 12 V to the AMS1117 or the ESP32's VIN; everything after the 5 V step-down stays as it is.
+- Always-on WiFi is roughly 0.5–1 W (12–24 Wh/day): a large battery and panel for cloudy winter days. Sleeping between readings, with WiFi only for the collector's pull, cuts that by a large factor.
+- Sleep needs a protocol change (see stage 22's decision point) and wake-up by the ESP32's sleep timer or a DS3231 alarm.
+- The dev board's USB-to-serial chip, regulator and power LED keep drawing while the ESP32 sleeps; so does the AMS1117 module and its LED. Trimming LEDs, a low-drain regulator, or a bare module instead of a dev board may be needed.
+- Battery chemistry: LiFePO4 must not be charged below 0 °C without a heater or cold cutoff; sealed lead-acid charges in the cold but is heavier.
+- The panel needs sun and the open box needs shade, so they mount apart.
 
 ## Collector change (pico-dev, stage 22)
 
@@ -204,6 +220,7 @@ The ambient logger is the barometer for the thermistor boiling-point calibration
 14. **AMS1117 input headroom:** it needs about 1.1 V above its output, so at least ~4.4 V in. Fed from VIN it gets ~4.7 V after the board's diode, so the margin is small. A cheap charger, a sagging PC port, or a long thin USB cable could drop the sensor rail. Stage 12a measures it, including during WiFi bursts (a meter may not catch short dips).
 15. **USB-to-VIN diode:** assumed from the usual DevKit-V1 design, not checked on this Elegoo board. Stage 12a's VIN reading confirms it.
 16. **Breather vent lag:** how fast pressure inside the warm box follows outside through the vent is unchecked; expected seconds, fine for weather logging.
+17. **Solar power figures are estimates:** 0.5–1 W always-on, the battery/panel sizes, and the dev board's sleep current (guessed at several mA or more) are unmeasured. Step 1 of Future: solar power replaces them.
 
 ## Verification
 

@@ -22,11 +22,12 @@ Development goes in **stages, each introducing exactly one new unknown**. A wiri
   - The PTFE board is compared on steady-state periods only.
 - **Integration: the logger pushes (decided 2026-10-02).** A sleeping logger can't wait to be asked, so the ambient logger starts every transfer: it wakes on its own schedule, connects, sends every record since its last confirmed one, waits for the acknowledgement, and goes back to sleep. The packets and acknowledgements stay close to temp-sense's (`temp-sense/temp-logger-udp-protocol.md`, data / acknowledge, resume from the logger's own watermark); only who starts the exchange changes. Still exactly one collector.
   - **Collector:** a listener on dev10 (the DC-powered Dell desktop), up whenever dev10 is, usually about 06:00–18:00. Its uptime doesn't matter: when it's down, records build up on the SD card and go out with the next successful push. No overnight collection needed. Nothing new runs 24/7.
+  - **Push interval:** default every 60 minutes inside the push window (`config push`); set to 1–5 minutes during development for a quick feedback loop.
   - **Push window:** set by command, e.g. 06:00–18:00 by the logger's clock. No push attempts outside it, so the logger doesn't spend power on WiFi all night.
   - **Back-off:** after a failed push, wait longer before the next try (covers a day when dev10 is off).
   - **Clock check:** the acknowledgement carries dev10's UTC time. The logger records its clock's offset (and may correct it), which settles setting the clocks from one source.
   - The attic Pico keeps being pulled, unchanged, until a separate decision to move it to push (stage 26 is the natural point).
-  - The ESP32 gets a DHCP reservation, the same approach as the Pico's fixed .120 address.
+  - **Addresses:** the router can't reserve addresses by MAC. The logger's own address doesn't matter (nothing contacts it), so it takes whatever the router gives. The listener's address must stay put: dev10 either gets a fixed address in its own network settings, outside the router's pool, or asks the router for a particular address the way the Pico does (the router then knows it's taken; but dev10 is off overnight, so the address could be lent to something else, and dev10 would need to retry like the Pico). Which DHCP client dev10 uses isn't known here. It goes in `wifi_secrets.h` as `LISTENER_HOST`. (The attic Pico, which is pulled, asks the router for .120 and retries until it gets it.) Fallbacks if that proves awkward: find dev10 by name (mDNS) or broadcast to 192.168.1.255.
 - **Clock:** DS3231 on I2C bus 0, kept in UTC, same convention as temp-sense. Coin cell keeps time across power outages.
 - **Storage:** SD card on SPI, holding a ring of records that survives reboots, like temp-sense's `sd_ring`.
 - **Pressure:** BMP388 on I2C bus 0. Compensation math from Bosch's BMP3 sensor API rather than our own.
@@ -56,6 +57,7 @@ Development goes in **stages, each introducing exactly one new unknown**. A wiri
 | SD card MISO | 19 | D19 | |
 | SD card MOSI | 23 | D23 | |
 | SD card CS | 4 | D4 | Not the VSPI default (GPIO 5 is a strapping pin, avoided) |
+| Supply voltage sense | 34 | D34 | Production only. Input-only analog pin (ADC1), via a resistor divider from the 5 V node |
 | Sensor power | — | 3V3 | |
 | Ground | — | GND | |
 
@@ -67,7 +69,7 @@ Avoided: GPIO 0/2/5/12/15 (strapping), 6–11 (flash), 34–39 (input only).
   1  EN                       1  D23   ← SD MOSI
   2  VP (36)                  2  D22   ← bus 0 SCL
   3  VN (39)                  3  TX0
-  4  D34                      4  RX0
+  4  D34   ← supply V sense    4  RX0
   5  D35                      5  D21   ← bus 0 SDA
   6  D32   ← bus 1 SDA        6  D19   ← SD MISO
   7  D33   ← bus 1 SCL        7  D18   ← SD SCK
@@ -167,9 +169,11 @@ Each stage lists what's **new** and its **pass check**. Don't start the next sta
 | 9 | **code:** `analyze.py` | stage-8 log | offset/noise/dropout table per sensor |
 | 10 | *(when the mux arrives)* **wiring:** Layout B | i2c-scan (mux-aware) | 0x70 on bus 0; 0x44 on channels 0–5 |
 | 11 | **code:** mux entries in table | stage-10 wiring | all 6 logged together overnight; analyze |
-| 12 | **code:** `common/wifi` + `ambient` answering `ping` only, no sensor | nothing wired | `udp_client.py ping` replies; survives an AP reboot (reconnects) |
+| 12 | **code:** `common/wifi` + `ambient` as a UDP client: status line pushed every 10 s, `udp_listener.py` acks with UTC; joins the strongest access point | nothing wired | **passed 2026-10-03 on board 2:** connects; acks every 10 s; listener stopped/restarted with no reboot; router restart → reconnects with no reboot; fresh start picks the stronger access point |
 | 12b | **code + meter:** deep-sleep current of a bare dev board (board 3, the spare: a minimal program that goes straight to deep sleep) | nothing wired | current from the 5 V supply measured awake and asleep. Decides whether a dev board can run on solar, or needs trimming (LEDs) or a bare module |
-| 12a | **wiring:** perf-board 5 V input (barrel jack, break point, capacitor) to VIN, and the AMS1117 3.3 V module from the same 5 V node, ground shared, nothing on the module's output yet. First, with only USB connected, check VIN reads ~4.7 V (confirms the USB-to-VIN diode) before ever connecting both supplies | meter only; stage-12 code | VIN ~4.7 V on USB alone (diode present); on the 5 V input alone the ESP32 boots and answers `ping`, and the jack holds ≥ 4.75 V while it sends over WiFi; 3.3 V (±2%) at the module output, also while the ESP32 is sending over WiFi; with both connected, flashing and the console still work |
+| 12a | **wiring:** perf-board 5 V input (barrel jack, break point, capacitor) to VIN, and the AMS1117 3.3 V module from the same 5 V node, ground shared, nothing on the module's output yet. First, with only USB connected, check VIN reads ~4.7 V (confirms the USB-to-VIN diode) before ever connecting both supplies | meter only; stage-12 code | VIN ~4.7 V on USB alone (diode present); on the 5 V input alone the ESP32 boots and its pushes reach the listener, and the jack holds ≥ 4.75 V while it sends over WiFi; 3.3 V (±2%) at the module output, also while the ESP32 is sending over WiFi; with both connected, flashing and the console still work. Also wired here: the supply-voltage divider (see Commands and reporting) from the 5 V node to GPIO 34; meter reads about the expected fraction of the input at the pin |
+| 12c | **code:** settings store (NVS) + serial console with the bench commands; settings apply immediately and survive a reboot | stage-12a node | each command in the list works on the serial console; `config` changes survive `reboot`; `config push` changes the status-push rate live; opening the console with the terminal set not to toggle reset lines leaves the logger running |
+| 12d | **code:** supply-voltage reading in `status` and in each push | stage-12c node | reading within ±2% of the meter at the jack, on the wall charger and on a bench supply set to 4.5 and 5.5 V |
 | 13 | **wiring:** DS3231 board on bus 0, powered from the AMS1117 module | i2c-scan | finds 0x68 (and 0x57 if the board has the memory chip) |
 | 14 | **code:** `common/ds3231` + a `time` / `settime` command in `ambient` | stage-13 wiring | time set from the PC reads back; still correct after unplugging the ESP32 for a few minutes |
 | 15 | **wiring:** SD card board on SPI (D18/D19/D23/D4) | meter only | 3.3 V at the card's supply pin (or 5 V at the board's input if it has its own regulator); no shorts between the four signal lines |
@@ -177,14 +181,56 @@ Each stage lists what's **new** and its **pass check**. Don't start the next sta
 | 17 | **wiring:** generic BMP388 on bus 0, SDO tied for 0x77 | i2c-scan | finds 0x77 alongside 0x68 |
 | 18 | **code:** `common/bmp388` | stage-17 wiring | chip ID reads 0x50; pressure agrees with a nearby weather station reduced to station pressure, within the sensor's ±0.5 hPa |
 | 19 | **wiring:** SHT45-PTFE on bus 0, short leads | i2c-scan | 0x44 + 0x68 + 0x77 |
-| 20 | **code:** `ambient` sample loop: SHT45 + BMP388 on a timer, stamped from the DS3231, printed on serial only; interval settable by command (seconds for calibration runs, normal outdoor rate otherwise) | stage-19 wiring | plausible T/RH/pressure at the set interval; timestamps match the clock; switching to a few-second interval and back works without a reflash |
+| 20 | **code:** `ambient` sample loop: SHT45 + BMP388 on a timer, stamped from the DS3231, plus supply voltage, DS3231 temperature and BMP388 temperature, printed on serial only; interval settable by command (seconds for calibration runs, normal outdoor rate otherwise) | stage-19 wiring | plausible T/RH/pressure at the set interval; timestamps match the clock; switching to a few-second interval and back works without a reflash |
 | 21 | **code:** record format + SD ring (copied from temp-sense, adapted) | stage-20 node | records persist across reboot; sequence numbers continue, no repeats |
-| 22 | **code:** push transfer (packet format copied from `xfer_proto`; session logic reversed so the logger starts) + listener on dev10 (pico-dev repo), logger still always awake; push window, back-off, clock check in the acknowledgement | stage-21 node | every record arrives; listener stopped for an hour, then the backlog arrives with no gaps; no push attempts outside the window; logger reports its clock offset from dev10; Pico pull unaffected |
+| 22 | **code:** push transfer (packet format copied from `xfer_proto`; session logic reversed so the logger starts) + listener on dev10 (pico-dev repo), logger still always awake; push window, back-off, clock check in the acknowledgement | stage-21 node | Also: commands carried in the ack (queued at the listener, applied by the logger, result reported in the next push), the listener's command log, and the health fields in each push. Pass: every record arrives; a queued remote command is applied and its result logged at the listener; with the logger's pushes blocked for over two push intervals, the listener raises the silence alert; listener stopped for an hour, then the backlog arrives with no gaps; no push attempts outside the window; logger reports its clock offset from dev10; Pico pull unaffected |
 | 22b | **code:** sleep between samples (wake by the ESP32's sleep timer; DS3231 alarm only if timing drifts) | stage-22 node | readings keep their interval and timestamps; pushes still arrive; current measured awake and asleep for the whole logger |
 | 23 | **wiring:** 1 m outdoor cable to the SHT45, on the bench | stage-22 code | hours of logging with zero `valid=0` on the SHT45. If there are errors, drop to 50 kHz |
 | 24 | **code:** heater logic (RH > 95% sustained) | bench | `heat` pulse visible as a temp spike; next readings marked invalid, then recover |
 | 25 | install outdoors; listener running on dev10 (manual on dev10) | — | records arrive every push during dev10's hours; the overnight backlog drains on the first push each morning |
 | 26 | *(separate, later)* extract the shared storage/transfer code into its own repo; temp-sense and ambient both switch to it | both loggers working | both rebuilt, flashed, and pulled by the collector with no change in output |
+
+## Commands and reporting (decided 2026-10-03)
+
+The logger never listens, so commands reach it two ways, sharing one set of command handlers:
+- **Bench:** a serial console over USB (ESP-IDF's `console` component). Opening the port normally resets the ESP32; set the terminal program not to toggle the reset lines when the logger must keep running.
+- **Remote:** commands queued at the listener ride in the next ack; the logger applies them and reports the result in its following push. They wait for the next push (up to the push interval). The listener keeps a command log (queued → sent with an ack → done, with result and times) and a view of pending and finished commands.
+
+Settings are saved (NVS, or a settings file on the SD card like temp-sense's `config.dat`) and applied immediately, without a reboot.
+
+| Command | What it does | Where |
+|---|---|---|
+| `status` | running time; clock time and whether set; last clock offset; WiFi (signal, access point, address); last push result; backlog; supply voltage | both |
+| `read` | latest temperature, RH, pressure with timestamp | both |
+| `sd` | storage ring: capacity, records, sequence range, last confirmed, backlog | both |
+| `info` | firmware version and build date, SHT45 serial number, BMP388 chip ID, board MAC | both |
+| `config get` | every setting and its value | both |
+| `log [n]` | the last n entries of the problem log (WiFi connect failures with the router's reason code, push failures, restarts with cause, sensor/SD errors), plus counters since the log was cleared | both |
+| `config sample <seconds>` | sampling interval (seconds-scale for calibration runs) | both |
+| `config push <minutes>` | push interval (default 60) | both |
+| `config window <start> <end>` | push window | both |
+| `config clock auto\|report` | whether the ack's time corrects the clock or is only reported | both |
+| `config listener <ip> <port>` | where to push | bench only |
+| `config wifi <ssid> <pass>` | WiFi credentials, no reflash needed | bench only |
+| `settime` | set the clock from the computer (backup to the ack time) | bench only |
+| `push` | push now, ignoring the schedule | bench only |
+| `heat` | one SHT45 heater pulse | both |
+| `reboot` | restart; nothing lost | both |
+| `format` | erase the SD card; needs a confirmation word | bench only |
+
+Bench only: a wrong listener address or WiFi password sent remotely would cut the logger off, and erasing the card shouldn't be one queued line away.
+
+**More information rather than less** (the user's preference). Each record carries, besides T/RH/pressure:
+- supply voltage (resistor divider from the 5 V node to GPIO 34; wired at stage 12a, read from 12d)
+- warm-box temperature from the DS3231's built-in sensor (coarse, about ±3 °C) and from the BMP388
+
+**Problem log:** an event log on the SD card, plus counters that survive restarts (not reset at boot), so e.g. "WiFi failed 140 times since Tuesday" is visible. Read with `log`. Plugging in USB may restart the board, but the log is on the card, so nothing is lost.
+
+**Errors never stop logging:** WiFi setup and connect failures are logged and retried; the logger keeps sampling to the SD card and the backlog covers the gap. `wifi_connect` returns an error instead of restarting the board (done 2026-10-03). Remaining hard stops are only for things nothing can work without, and should fall back to defaults where possible.
+
+**Silence alert at the collector:** the listener alerts when no push arrives from the logger for about two push intervals inside the push window. The usual response: plug in USB at the logger and read `log`. How the alert reaches the user (desktop notification on dev10, email, or a log line) is not yet chosen.
+
+Each push also carries health information: last reset reason (power-on, crash, watchdog, brownout), WiFi connect time and push duration (the real radio-on cost, for solar sizing), error counts since boot (sensor reads, SD writes, push failures), clock offset at each ack and whether it was corrected, and free memory.
 
 ## Boiling-point calibration support
 
@@ -241,6 +287,10 @@ Design notes:
 19. **HT7333 figures are from memory**, not its datasheet.
 20. **Listener on dev10:** port opening from its container and start-up with dev10 are untested from this VM.
 21. **Why temp-sense left MQTT** (an earlier push-style design) hasn't been checked; if it was a reason that applies to push in general, it matters here.
+22. **Push window in UTC or local time:** open. The clock runs in UTC; a local 06:00–18:00 window would shift an hour at each daylight-saving change unless the logger knows the time-zone rules. Suggested: set it in UTC, a little wider than dev10's hours.
+23. **ESP32 analog input accuracy:** roughly ±1–2% after the chip's own calibration; calibrate against the meter if more is needed. The divider draws a constant small current (µA with large resistors).
+24. **Serial console without resetting:** whether the terminal programs used here can open the port without toggling the reset lines is untested.
+25. **Silence alert delivery:** how the listener reaches the user isn't chosen.
 
 ## Verification
 

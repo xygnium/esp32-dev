@@ -63,6 +63,7 @@ Opening the console resets the ESP32 (the serial chip's reset lines), as on the 
 | SD card MISO | 19 | D19 | |
 | SD card MOSI | 23 | D23 | |
 | SD card CS | 4 | D4 | Not the VSPI default (GPIO 5 is a strapping pin, avoided) |
+| Sidecar excitation (EXC) | 25 | D25 | Production only. Switches the thermistor divider on during readings (ads1115-dev pulsed excitation). Not a strapping pin |
 | Supply voltage sense | 34 | D34 | Production only. Input-only analog pin (ADC1), via a resistor divider (2 × 100 kΩ) from VIN |
 | Sensor power | — | 3V3 | |
 | Ground | — | GND | |
@@ -79,7 +80,7 @@ Avoided: GPIO 0/2/5/12/15 (strapping), 6–11 (flash), 34–39 (input only).
   5  D35                      5  D21   ← bus 0 SDA
   6  D32   ← bus 1 SDA        6  D19   ← SD MISO
   7  D33   ← bus 1 SCL        7  D18   ← SD SCK
-  8  D25                      8  D5
+  8  D25   ← sidecar EXC       8  D5
   9  D26                      9  TX2
  10  D27                     10  RX2
  11  D14                     11  D4    ← SD CS
@@ -132,7 +133,84 @@ Three physical parts:
 3. **Open box**: SHT45-PTFE only, open to outside air (free airflow, shaded from sun and rain; no breather vent, which passes air too slowly for humidity and temperature to follow outside), away from the warm box's heat, on ≤ 1 m of 4-conductor cable (3.3 V, GND, SDA, SCL).
    - If you use Cat5/6, pair SDA with GND and SCL with 3V3 to reduce crosstalk between SDA and SCL.
    - Seal the cable entry so water can't wick along the cable, but keep the membrane open to outside air.
-- Pins are bus 0: D21/D22, GND; SD card: D18/D19/D23/D4. Board power from the AMS1117 module (fed from VIN), not the ESP32's 3V3 pin.
+- **Thermistor sidecar (temporary, decided 2026-10-04):** a reusable module (ADS1115 board + precision resistor + thermistor on a CAT5 pair) that calibrates the SHT45 in place and then moves on to other projects. Its standard interface is five wires: 3.3 V (AMS1117), GND (single ground point; nothing else shares that wire), SDA (D21), SCL (D22), EXC (D25). On this logger: a plain 5-pin header on the warm-box board; jumper wires to the module; the cable leaves through the SHT45 cable's entry hole with a temporary seal (putty or tape). The module rides beside the warm box in a zip-lock bag or scrap box, out of the sun; the thermistor sits beside the SHT45 in the open box. Afterwards: unplug, reseal the hole. Not chosen: the module inside the warm box (box sized for a temporary part), or a GX12/M12 panel connector and sealed housing (too costly for a temporary arrangement). Bench-calibrating the SHT45 before install remains possible too. **Warm-box enclosure search:** choose a cable entry (gland or grommet) that can take the SHT45 cable plus a temporary second cable. Same five-wire interface on every host, including the Pico rework.
+- Pins are bus 0: D21/D22, GND; SD card: D18/D19/D23/D4; sidecar EXC: D25. Board power from the AMS1117 module (fed from VIN), not the ESP32's 3V3 pin.
+
+**Board wiring tables (production).** SD card and DS3231 pin names are from the common board types (check the silkscreen); BMP388 names as read off the CJMCU-388; ADS1115 names from `thermistor-cal/BOARDS.md`.
+
+SD card board (SPI):
+
+| SD board pin | Goes to | Notes |
+|---|---|---|
+| VCC (or 5V / 3V3) | VIN (5 V) if it has a regulator, AMS1117 3.3 V if not | wire as on the Pico logger (uncertainty 10) |
+| GND | GND rail | |
+| SCK / CLK | D18 | |
+| MISO / DO | D19 | |
+| MOSI / DI | D23 | |
+| CS | D4 | |
+
+DS3231 clock board (I2C, 0x68; memory chip 0x57):
+
+| DS3231 pin | Goes to | Notes |
+|---|---|---|
+| VCC | AMS1117 3.3 V | |
+| GND | GND rail | |
+| SDA | D21 | |
+| SCL | D22 | |
+| SQW | not connected | spare: alarm output, could wake the ESP32 from sleep later |
+| 32K | not connected | |
+
+BMP388, CJMCU-388 (I2C, 0x77 expected):
+
+| BMP388 pin | Goes to | Notes |
+|---|---|---|
+| VIN | AMS1117 3.3 V | board regulator gives the chip ~3.0 V |
+| 3V0 | not connected | board regulator output; never tie to the 3.3 V rail |
+| GND | GND rail | |
+| SCK | D22 (I2C clock) | |
+| SDI | D21 (I2C data) | |
+| SDO | open if pulled up on the board (0x77), else 3.3 V | meter check pending |
+| CS | open if pulled up (I2C mode), else 3.3 V | meter check pending |
+| INT | not connected | |
+
+Thermistor sidecar module, ADS1115 board (I2C, 0x48). Channel use is proposed, from ads1115-dev's design (one channel monitors the excitation; each thermistor is a ratio against it):
+
+| ADS1115 pin | Goes to | Notes |
+|---|---|---|
+| VCC | header 3.3 V | |
+| GND | header GND | the module's single ground point |
+| SDA | header SDA (D21) | |
+| SCL | header SCL (D22) | |
+| ADDR | board default (pulled to GND → 0x48) | |
+| ALRT | not connected | |
+| A0 | excitation monitor: EXC via 1 kΩ, 100 nF to GND at the pin | proposed |
+| A1 | thermistor tap via 1 kΩ, 100 nF to GND at the pin | proposed |
+| A2, A3 | not connected or tied to GND | spare (up to 3 thermistors) |
+
+Divider on the module: EXC (D25) → precision 10 kΩ → tap (A1) → thermistor over its CAT5 pair → module GND. While fitted the module adds a 5th device and pull-up pair to the bus (combined pull-up ~2 kΩ or a little less) and its power LED draws a mA or two.
+
+5-pin sidecar header on the warm-box board:
+
+| Header pin | Goes to |
+|---|---|
+| 1 | 3.3 V (AMS1117) |
+| 2 | GND |
+| 3 | SDA (D21) |
+| 4 | SCL (D22) |
+| 5 | EXC (D25) |
+
+Connections per point on the warm-box board:
+
+| Point | Connections |
+|---|---|
+| 3.3 V (AMS1117 out) | DS3231, BMP388, SHT45 cable, sidecar header (+ SD if 3.3 V) |
+| GND | SD, DS3231, BMP388, SHT45 cable, sidecar header, AMS1117, 220 µF, divider |
+| D21 (SDA) | DS3231, BMP388, SHT45 cable, sidecar header |
+| D22 (SCL) | DS3231, BMP388, SHT45 cable, sidecar header |
+| D18, D19, D23, D4 | SD card only |
+| D34 | supply-voltage divider |
+| D25 | sidecar header |
+| VIN (5 V) | AMS1117, 220 µF, divider (+ SD if 5 V type) |
 
 **Supply-voltage divider (stage 12a)**
 

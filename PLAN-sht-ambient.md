@@ -134,6 +134,31 @@ Three physical parts:
    - Seal the cable entry so water can't wick along the cable, but keep the membrane open to outside air.
 - Pins are bus 0: D21/D22, GND; SD card: D18/D19/D23/D4. Board power from the AMS1117 module (fed from VIN), not the ESP32's 3V3 pin.
 
+**Supply-voltage divider (stage 12a)**
+
+```
+ESP32 VIN (left pin 15) ──────────┐
+                                  │
+                                 [R1] 100 kΩ 1%
+                                  │
+                       junction ──┼──────────────── 30 AWG ──── ESP32 D34 (left pin 4)
+                                  │        │
+                                 [R2]     [C1] 100 nF ("104")
+                            100 kΩ 1%      │
+                                  │        │
+GND rail ─────────────────────────┴────────┘
+```
+
+| From | Part | To |
+|---|---|---|
+| ESP32 VIN (left pin 15), or the VIN wire to the AMS1117 | R1, 100 kΩ 1% | junction |
+| junction | R2, 100 kΩ 1% | GND rail |
+| junction | C1, 100 nF | GND rail |
+| junction | 30 AWG wire | ESP32 D34 (left pin 4) |
+
+Expected: unpowered, D34 to GND ≈ 100 kΩ (a bit less with the ESP32 input in parallel; may climb briefly while C1 charges). Powered, D34 ≈ half of VIN (~2.5 V). Pin numbers from the standard DevKit V1 layout; check the board's silkscreen.
+
+
 The wiring notes go into the repo as `sht-compare/WIRING.md` and `ambient/WIRING.md`.
 
 ## Code layout
@@ -177,9 +202,9 @@ Each stage lists what's **new** and its **pass check**. Don't start the next sta
 | 11 | **code:** mux entries in table | stage-10 wiring | all 6 logged together overnight; analyze |
 | 12 | **code:** `common/wifi` + `ambient` as a UDP client: status line pushed every 10 s, `udp_listener.py` acks with UTC; joins the strongest access point | nothing wired | **passed 2026-10-03 on board 2:** connects; acks every 10 s; listener stopped/restarted with no reboot; router restart → reconnects with no reboot; fresh start picks the stronger access point |
 | 12b | **code + meter:** deep-sleep current of a bare dev board (board 3, the spare: a minimal program that goes straight to deep sleep) | nothing wired | current from the 5 V supply measured awake and asleep. Decides whether a dev board can run on solar, or needs trimming (LEDs) or a bare module |
-| 12a | **wiring:** AMS1117 module input from ESP32 VIN, ground shared, nothing on the module's output yet; 220 µF 25 V capacitor across VIN–GND; 2 × 100 kΩ divider from VIN to GPIO 34. Powered through the USB socket only. (Done first: VIN on USB alone, board 2 read 5.06–5.09 V → no diode.) | meter only; stage-12 code | ESP32 boots and its pushes reach the listener; VIN ≥ 4.75 V while it sends over WiFi; 3.3 V (±2%) at the module output, also during WiFi; GPIO 34 reads about half of VIN; same on the USB-A charger and on the laptop. The pass-through and USB inline meter are added when the box is built |
+| 12a | **wiring:** AMS1117 module input from ESP32 VIN, ground shared, nothing on the module's output yet; 220 µF 25 V capacitor across VIN–GND; 2 × 100 kΩ divider from VIN to GPIO 34 plus 100 nF across the lower resistor (divider and capacitor away from the ESP32, 30 AWG lead to GPIO 34). Powered through the USB socket only. (Done first: VIN on USB alone, board 2 read 5.06–5.09 V → no diode.) | meter only; stage-12 code | ESP32 boots and its pushes reach the listener; VIN ≥ 4.75 V while it sends over WiFi; 3.3 V (±2%) at the module output, also during WiFi; GPIO 34 reads about half of VIN; same on the USB-A charger and on the laptop. The pass-through and USB inline meter are added when the box is built |
 | 12c | **code:** settings store (NVS) + serial console with the bench commands; settings apply immediately and survive a reboot | stage-12a node | each command in the list works on the serial console; `config` changes survive `reboot`; `config push` changes the status-push rate live; opening the console with the terminal set not to toggle reset lines leaves the logger running |
-| 12d | **code:** supply-voltage reading in `status` and in each push | stage-12c node | reading within ±2% of the meter at VIN, on the wall charger and on a bench supply set to 4.5 and 5.5 V |
+| 12d | **code:** supply-voltage reading in `status` and in each push | stage-12c node | reading within ±2% of the meter at VIN, on the USB-A wall charger and on the laptop |
 | 13 | **wiring:** DS3231 board on bus 0, powered from the AMS1117 module | i2c-scan | finds 0x68 (and 0x57 if the board has the memory chip) |
 | 14 | **code:** `common/ds3231` + a `time` / `settime` command in `ambient` | stage-13 wiring | time set from the PC reads back; still correct after unplugging the ESP32 for a few minutes |
 | 15 | **wiring:** SD card board on SPI (D18/D19/D23/D4) | meter only | 3.3 V at the card's supply pin (or 5 V at the board's input if it has its own regulator); no shorts between the four signal lines |
@@ -227,7 +252,7 @@ Settings are saved (NVS, or a settings file on the SD card like temp-sense's `co
 Bench only: a wrong listener address or WiFi password sent remotely would cut the logger off, and erasing the card shouldn't be one queued line away.
 
 **More information rather than less** (the user's preference). Each record carries, besides T/RH/pressure:
-- supply voltage (2 × 100 kΩ divider from VIN to GPIO 34, about 25 µA; wired at stage 12a, read from 12d)
+- supply voltage (2 × 100 kΩ 1% metal-film divider from VIN to GPIO 34, about 25 µA, any wattage; a 100 nF ceramic capacitor ("104") across the lower resistor steadies the high-resistance input during sampling. Layout for board 2's perf board: the divider and capacitor sit together away from the ESP32 (space), with a 30 AWG lead from their junction to GPIO 34; the capacitor feeds the lead from a low resistance, so pickup should stay small. If stage 12d's readings are jumpy, first fix: move the capacitor to the GPIO 34 end of the lead. Keep the lead short and away from the antenna end; wired at stage 12a, read from 12d)
 - warm-box temperature from the DS3231's built-in sensor (coarse, about ±3 °C) and from the BMP388
 
 **Problem log:** an event log on the SD card, plus counters that survive restarts (not reset at boot), so e.g. "WiFi failed 140 times since Tuesday" is visible. Read with `log`. Plugging in USB may restart the board, but the log is on the card, so nothing is lost.
@@ -256,6 +281,7 @@ A goal since 2026-10-02: the user wants these projects on battery-backed solar p
 3. **Build** a small solar setup (panel, charge controller with low-voltage load disconnect, battery, 12 V → 5 V step-down converter such as a car USB charger) feeding the same USB cable. Run it beside the wall-charger data through cloudy stretches.
 
 Design notes:
+- Before running on solar, check the supply-voltage reading across a range (e.g. 4.5–5.5 V fed through a USB cable from a bench supply), set aside from stage 12d.
 - Never feed 12 V to the AMS1117 or the ESP32's VIN; everything after the 5 V step-down stays as it is.
 - Always-on WiFi is roughly 0.5–1 W (12–24 Wh/day): a large battery and panel for cloudy winter days. Sleeping between readings, with WiFi only for pushes inside the push window, cuts that by a large factor.
 - The dev board's USB-to-serial chip, regulator and power LED keep drawing while the ESP32 sleeps; so does the AMS1117 module and its LED. Trimming LEDs, a low-drain regulator, or a bare module instead of a dev board may be needed.

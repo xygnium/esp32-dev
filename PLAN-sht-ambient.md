@@ -14,7 +14,7 @@ Development goes in **stages, each introducing exactly one new unknown**. A wiri
 
 - **Hardware:**
   - Comparison rig: 2× Adafruit SHT45 (one with PTFE), 1× generic SHT45, 3× generic SHT31.
-  - Ambient logger: 1× generic BMP388 board (pressure), DS3231 clock board, SD card board, AMS1117 3.3 V module, breather vent (IP68), plus the SHT45-PTFE chosen by the comparison.
+  - Ambient logger: 1× generic BMP388 board, CJMCU-388 (arrived 2026-10-04) (pressure), DS3231 clock board, SD card board, AMS1117 3.3 V module, breather vent (IP68), plus the SHT45-PTFE chosen by the comparison.
   - ESP32: Elegoo ESP-WROOM-32 dev boards, three of them, labelled by paint dots (SETUP-PLAN.md, "The three boards"): 1 = bench, 2 = ambient logger perf board, 3 = spare.
 - **Addresses:** all SHT45s are fixed at 0x44; SHT31s are 0x44 or 0x45 via the ADR pin. The ESP32 has 2 hardware I2C buses, so without a mux the maximum is 2 SHT45 + 2 SHT31 at once.
 - **Mux:** a TCA9548A is recommended, but nothing waits for it. The firmware sensor table holds `{label, model, supplier, ptfe, bus, mux_ch|none, addr}`, so batch and mux layouts use the same code.
@@ -208,7 +208,7 @@ Each stage lists what's **new** and its **pass check**. Don't start the next sta
 | 13 | **wiring:** DS3231 board on bus 0, powered from the AMS1117 module | i2c-scan | finds 0x68 (and 0x57 if the board has the memory chip) |
 | 14 | **code:** `common/ds3231` + a `time` / `settime` command in `ambient` | stage-13 wiring | time set from the PC reads back; still correct after unplugging the ESP32 for a few minutes |
 | 15 | **wiring:** SD card board on SPI (D18/D19/D23/D4) | meter only | 3.3 V at the card's supply pin (or 5 V at the board's input if it has its own regulator); no shorts between the four signal lines |
-| 16 | **code:** `sd-probe` | stage-15 wiring | mounts; file written, read back identical; survives a reboot |
+| 16 | **code:** `sd-probe` | stage-15 wiring | with the 32 GB SDHC card: mounts; file written, read back identical; survives a reboot (and, if wanted, the same with a 128 MB SDSC card) |
 | 17 | **wiring:** generic BMP388 on bus 0, SDO tied for 0x77 | i2c-scan | finds 0x77 alongside 0x68 |
 | 18 | **code:** `common/bmp388` | stage-17 wiring | chip ID reads 0x50; pressure agrees with a nearby weather station reduced to station pressure, within the sensor's ±0.5 hPa |
 | 19 | **wiring:** SHT45-PTFE on bus 0, short leads | i2c-scan | 0x44 + 0x68 + 0x77 |
@@ -219,7 +219,7 @@ Each stage lists what's **new** and its **pass check**. Don't start the next sta
 | 23 | **wiring:** 1 m outdoor cable to the SHT45, on the bench | stage-22 code | hours of logging with zero `valid=0` on the SHT45. If there are errors, drop to 50 kHz |
 | 24 | **code:** heater logic (RH > 95% sustained) | bench | `heat` pulse visible as a temp spike; next readings marked invalid, then recover |
 | 25 | install outdoors; listener running on dev10 (manual on dev10) | — | records arrive every push during dev10's hours; the overnight backlog drains on the first push each morning |
-| 26 | *(separate, later)* extract the shared storage/transfer code into its own repo; temp-sense and ambient both switch to it | both loggers working | both rebuilt, flashed, and pulled by the collector with no change in output |
+| 26 | *(separate, later)* extract the shared storage/transfer code into its own repo; temp-sense and ambient both switch to it. The Pico's card layer will also need swapping from the SDSC-only library to one for SDHC when the 128 MB cards run out | both loggers working | both rebuilt, flashed, and pulled by the collector with no change in output |
 
 ## Commands and reporting (decided 2026-10-03)
 
@@ -227,7 +227,7 @@ The logger never listens, so commands reach it two ways, sharing one set of comm
 - **Bench:** a serial console over USB (ESP-IDF's `console` component). Opening the port normally resets the ESP32; set the terminal program not to toggle the reset lines when the logger must keep running.
 - **Remote:** commands queued at the listener ride in the next ack; the logger applies them and reports the result in its following push. They wait for the next push (up to the push interval). The listener keeps a command log (queued → sent with an ack → done, with result and times) and a view of pending and finished commands.
 
-Settings are saved (NVS, or a settings file on the SD card like temp-sense's `config.dat`) and applied immediately, without a reboot.
+Settings are saved (NVS, or a settings file on the SD card like temp-sense's `config.dat`) and applied immediately, without a reboot. The WiFi password is stored in plain text in flash (readable with esptool by anyone holding the board): accepted for this application (2026-10-04). A router that separates IoT, guest and admin networks is a possible later upgrade; it would also allow address reservations by MAC, but then the router must let UDP 8080 through from the IoT network to dev10 (push needs only that one outbound path).
 
 | Command | What it does | Where |
 |---|---|---|
@@ -248,6 +248,9 @@ Settings are saved (NVS, or a settings file on the SD card like temp-sense's `co
 | `heat` | one SHT45 heater pulse | both |
 | `reboot` | restart; nothing lost | both |
 | `format` | erase the SD card; needs a confirmation word | bench only |
+| `flush` | write the waiting batch to the SD card now | both |
+| `shutdown` | flush, stop sampling, report "ready for power off" | both (remote is the useful one) |
+| `resume` | start sampling again after `shutdown` | both |
 
 Bench only: a wrong listener address or WiFi password sent remotely would cut the logger off, and erasing the card shouldn't be one queued line away.
 
@@ -259,11 +262,41 @@ Bench only: a wrong listener address or WiFi password sent remotely would cut th
 
 **Errors never stop logging:** WiFi setup and connect failures are logged and retried; the logger keeps sampling to the SD card and the backlog covers the gap. `wifi_connect` returns an error instead of restarting the board (done 2026-10-03). Remaining hard stops are only for things nothing can work without, and should fall back to defaults where possible.
 
-**Silence alert at the collector:** the listener alerts when no push arrives from the logger for about two push intervals inside the push window. The usual response: plug in USB at the logger and read `log`. How the alert reaches the user (desktop notification on dev10, email, or a log line) is not yet chosen.
+**Silence alert at the collector:** the listener alerts when no push arrives from the logger for about two push intervals inside the push window. The usual response: plug in USB at the logger and read `log`. An "all clear" follows when pushes resume. No alerts while dev10 is off (no pushes are expected then); after the listener starts it waits a full period before it can alert.
+
+**Alert delivery (decided 2026-10-04): email**, to an address that is configurable and kept in the listener's local settings file (git-ignored, like `wifi_secrets.h`), not in the plan or code. The listener also writes every alert to its own log. Sending needs a mail account to send from; with Gmail that's an app password (requires two-step verification). Other channels (desktop notification on dev10, a phone push service such as ntfy) can be added later.
 
 **Low-supply handling (wall power):** the supply voltage is in every record and push, so trends show at the listener (a weakening charger, a connection going bad). Crossing a low threshold writes a problem-log entry on the logger, so `log` after a crash or brownout restart shows whether the supply sagged first. The listener alerts when pushes report the supply below a threshold, like the silence alert. Thresholds (perhaps ~4.6 V) are set after normal values have been seen, not guessed now.
 
 Each push also carries health information: last reset reason (power-on, crash, watchdog, brownout), WiFi connect time and push duration (the real radio-on cost, for solar sizing), error counts since boot (sensor reads, SD writes, push failures), clock offset at each ack and whether it was corrected, and free memory.
+
+## SD card contents (reviewed 2026-10-04)
+
+**Card:** the 32 GB SDHC card, formatted FAT32. ESP-IDF's SD driver handles both standard-capacity (SDSC, ≤2 GB, like the 128 MB cards) and high-capacity (SDHC) cards, so the ESP32 isn't tied to the 128 MB cards, which are no longer sold; those stay with the Pico loggers. To confirm at stage 16 (`sd-probe`) with the 32 GB card.
+
+| File | Holds | Written | Size |
+|---|---|---|---|
+| `ring.dat` | readings, fixed 32-byte records at slot seq % capacity (temp-sense scheme) | every sample | fixed, created once (64 MB ≈ 4 years at one sample a minute) |
+| `ring_state.dat` | next seq, confirmed watermark, counters that survive restarts | at each acknowledged push | one 512-byte block, rewritten |
+| `events.dat` | problem log: a second ring of fixed-size entries (time, type, code, value) | when something happens | fixed, tens of thousands of entries |
+
+Settings stay in flash (NVS, stage 12c), which is written only on `config` commands. Anything saved often (counters, problem log, clock history) goes on the SD card, not in flash, to avoid wearing out the flash; the SD card manages its own wear. Until stage 21 brings the card, counters reset at each restart. No `config.dat`/`labels.dat`: settings are in NVS and the sensors are fixed.
+
+**Reading record (32 bytes, 16 per 512-byte block):** seq (4), UTC seconds from the DS3231 (4), SHT45 temperature in 0.01 °C (2), SHT45 RH in 0.01 % (2), BMP388 pressure in 1 Pa (4), supply voltage in mV (2), DS3231 temperature (2), BMP388 temperature (2), valid flags, one bit per sensor (1), format version (1), spare zeroed (4), CRC-32 (4). The DS3231 (0.25 °C steps, about ±3 °C, updated every 64 s) and BMP388 (about ±0.5 °C) report their own chip temperatures: the warm box, not outdoor air. Figures from memory; confirm at stages 14 and 18.
+
+**Problem-log entry types:** WiFi connect failed (with reason code); push failed or no reply; restart (with cause); sensor read error; SD error; supply low / recovered; clock offset at an ack and whether corrected; remote command applied (with result). Per-push health details (connect time, push duration, free memory) are sent, not stored; anything abnormal becomes a log entry.
+
+**Batched writes (decided 2026-10-04).** Records collect in the ESP32's RTC memory (8 KB; survives a restart, crash or sleep, but not a power loss) and are written to the card as whole blocks. The batch is written out ("flushed"):
+- before every push (so pushes send from the card, and pushed data is on the card);
+- before `reboot`, `format` and sleep;
+- when the supply falls below the low threshold (then writes stop; see Solar power);
+- on a `flush` command;
+- when the oldest held record reaches the time limit (e.g. 10 minutes), which caps what a power cut can lose;
+- after any restart, for whatever was waiting in RTC memory.
+
+**Planned power-down:** two ways, no button needed. (1) A remote `shutdown` command queued at the listener: at the next push the logger flushes, stops sampling and sends an extra push saying "ready for power off"; `resume` (or the next restart) starts sampling again. It waits for the next push, so set the push rate faster before a planned visit. (2) Unplug within one sample interval after a push lands at the listener: every push flushes first, so nothing is waiting. Both need the listener's log in view; at the box with only a laptop, rely on (2) without confirmation. Unplanned power loss still loses what's waiting, at most the time limit's worth. The swap-cables procedure for flashing counts as a power cut, so use (1) or (2) first.
+
+**Clock offset (decided 2026-10-04):** every push sends the offset to the listener, so the full series lives there (lining up the loggers, clock health, catching a wrong dev10 clock). The logger's problem log records only corrections (with size), offsets above a threshold (~2 s) and big jumps (a clock reset, e.g. a dead coin cell). Realigning: `clock auto` sets the DS3231 from the ack's time when the offset exceeds ~2 s (ack time is whole seconds; alignment within about a second, plenty for 1–2 minute samples), and logs it; `settime` on the console or queued remotely sets it by hand. dev10's own clock is kept right by an internet time service (NTP), so `clock auto` is the default (decided 2026-10-04). The attic Pico will be reworked to match the ESP32's operation (push, clock check, auto correction) in the near future, as a separate pico-dev job.
 
 ## Boiling-point calibration support
 
@@ -306,11 +339,11 @@ Design notes:
 3. **Generic boards may be counterfeit.** Log each chip's serial number, and watch for odd command responses or outlier behaviour.
 4. **The 1 m outdoor I2C cable** is the riskiest hardware choice. Stage 15 tests it; keep an alternative mounting approach in mind.
 5. **The heater threshold** (RH > 95% sustained) is a guess, untested through a real winter.
-6. **Sample interval:** the ambient logger should sample at the attic logger's rate, or a multiple of it, so readings line up. Not chosen yet.
+6. **Sample interval:** the attic logger samples every 2 min (user's recollection, 2026-10-04). The user keeps the two loggers' sample rates the same by setting both by hand (`config sample` on each).
 7. **The dev10 collector/container side** can't be tested from this VM.
-8. **Record layout.** The temp-sense protocol carries each reading as a 2-byte number with temperature in 1/16 °C steps (0.06 °C). That's too coarse if the SHT45 is checked against the calibrated thermistors (0.01 °C wanted). Pressure fits 2 bytes at 0.1 hPa steps. Likely needs a per-reading scale or a protocol version bump; decide at stage 21.
+8. **Record layout.** The temp-sense protocol carries each reading as a 2-byte number with temperature in 1/16 °C steps (0.06 °C), too coarse for checking against the calibrated thermistors. Settled for the SD record (see SD card contents: 0.01 °C, 0.01 % RH, 1 Pa); the push packet format follows at stage 22.
 9. **Clock setting.** Each logger's DS3231 drifts ~1 min/year (±2 ppm rated), which is fine. The risk is the initial setting: the attic Pico's clock date was last recorded as unset. Both clocks must be set from the same source. The same applies to the thermistor rig if its boil readings are matched to the ambient logger's pressure by time.
-10. **Spare parts on hand:** not confirmed that a DS3231 board and an SD card board are free for the ESP32, or what kind. Some SD boards want 5 V (own regulator + level shifter), some 3.3 V only; check before stage 15.
+10. **Spare parts on hand:** answered 2026-10-04: a DS3231 board and an SD card board are on hand, the same types used on the Pico logger (proven parts). Still to note: which supply voltage the SD board gets on the Pico (3.3 V or 5 V), to wire it the same way at stage 15.
 11. **FatFs on ESP-IDF:** ESP-IDF uses the same FatFs file library as the Pico code, but how directly temp-sense's `f_*` calls carry over (vs. going through ESP-IDF's file layer) is unchecked.
 12. **BMP388 facts are from memory:** address 0x77 with SDO high (0x76 with SDO low), chip ID 0x50, CSB high selects I2C, ±0.5 hPa absolute. The generic board's pin labels, pull-ups and regulator are unknown until it's in hand. Check against the datasheet at stage 17.
 13. **Heat and airflow:** the warm box's heat must not reach the open box; spacing and which one sits higher (warm air rises) are not yet decided. The open box's design (vent openings, sun and rain protection) is not yet described in this plan; it decides how fast the SHT45 follows outside air. Stage 23/25 should compare readings with the open box open vs. closed.
@@ -322,10 +355,10 @@ Design notes:
 19. **HT7333 figures are from memory**, not its datasheet.
 20. **Listener on dev10:** port opening from its container and start-up with dev10 are untested from this VM.
 21. **Why temp-sense left MQTT** (an earlier push-style design) hasn't been checked; if it was a reason that applies to push in general, it matters here.
-22. **Push window in UTC or local time:** open. The clock runs in UTC; a local 06:00–18:00 window would shift an hour at each daylight-saving change unless the logger knows the time-zone rules. Suggested: set it in UTC, a little wider than dev10's hours.
+22. **Push window: UTC (decided 2026-10-04).** No time-zone setting on the logger. dev10's ~06:00–18:00 local hours slide by an hour against a UTC window at each daylight-saving change, so set the window about an hour wider than dev10's hours; pushes at the edges fail harmlessly and back off. (A local-time window via a time-zone string was the alternative.) Units also decided: no change (bare `config push` = minutes, bare `config sample` = seconds).
 23. **ESP32 analog input accuracy:** roughly ±1–2% after the chip's own calibration; calibrate against the meter if more is needed. The divider draws a constant small current (µA with large resistors).
 24. **Serial console without resetting:** whether the terminal programs used here can open the port without toggling the reset lines is untested.
-25. **Silence alert delivery:** how the listener reaches the user isn't chosen.
+25. **Alert email from dev10:** whether dev10's container setup allows outgoing mail connections is unchecked; setting up the sending account's app password is a step on dev10.
 26. **USB-C pass-through:** not yet chosen; the ones seen don't pass CC (USB-A sources only). Data capability and fit must be checked per listing.
 
 ## Verification

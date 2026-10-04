@@ -12,12 +12,20 @@
 // assigned or timeout_ms passes. Returns 0 when connected; -1 on timeout,
 // with WiFi still trying in the background (poll wifi_is_connected()); -2 if
 // WiFi setup itself failed (step and reason logged), in which case WiFi is not
-// running and the caller should carry on without it. Never restarts the board. After any later
-// disconnect it reconnects on its own, retrying once a second.
+// running and the caller should carry on without it. Never restarts the
+// board. After any later disconnect it reconnects on its own, retrying once a
+// second.
 // Each connect scans every channel and joins the strongest access point
 // broadcasting the SSID (e.g. router vs. extender), not the first to answer.
 // Once connected it stays on that access point until the link drops.
+// NVS (the ESP32's flash settings area) must be initialised first; WiFi
+// keeps its radio calibration data there.
 int wifi_connect(const char *ssid, const char *pass, uint32_t timeout_ms);
+
+// Switch to another network (or fix a password): saves the new SSID and
+// password in the WiFi driver, drops the current link, and reconnects with
+// them. Returns 0, or -1 if WiFi isn't running.
+int wifi_set_credentials(const char *ssid, const char *pass);
 
 bool wifi_is_connected(void);
 

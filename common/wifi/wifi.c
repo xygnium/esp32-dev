@@ -9,7 +9,6 @@
 #include "esp_log.h"
 #include "esp_netif.h"
 #include "esp_wifi.h"
-#include "nvs_flash.h"
 #include "lwip/sockets.h"
 
 static const char *TAG = "wifi";
@@ -55,18 +54,6 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 
 int wifi_connect(const char *ssid, const char *pass, uint32_t timeout_ms)
 {
-    // WiFi keeps its radio calibration data in NVS (non-volatile storage,
-    // a small key-value settings area in flash), so NVS must be ready first.
-    // Still a hard stop: without NVS no saved settings work either. This init
-    // moves to the settings store at stage 12c, which should fall back to
-    // default settings instead of stopping.
-    esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        err = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(err);
-
     s_events = xEventGroupCreate();
     if (s_events == NULL) {
         ESP_LOGE(TAG, "setup failed: no memory for event group");
@@ -128,6 +115,25 @@ void wifi_ip_str(char *buf, size_t size)
         esp_netif_get_ip_info(s_netif, &ip);
     }
     snprintf(buf, size, IPSTR, IP2STR(&ip.ip));
+}
+
+int wifi_set_credentials(const char *ssid, const char *pass)
+{
+    wifi_config_t cfg;
+    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) != ESP_OK) {
+        return -1;                        // WiFi isn't running
+    }
+    memset(cfg.sta.ssid, 0, sizeof(cfg.sta.ssid));
+    memset(cfg.sta.password, 0, sizeof(cfg.sta.password));
+    strncpy((char *)cfg.sta.ssid, ssid, sizeof(cfg.sta.ssid));
+    strncpy((char *)cfg.sta.password, pass, sizeof(cfg.sta.password));
+    if (esp_wifi_set_config(WIFI_IF_STA, &cfg) != ESP_OK) {
+        return -1;
+    }
+    // Drop the current link; the disconnect handler reconnects with the new
+    // settings.
+    esp_wifi_disconnect();
+    return 0;
 }
 
 // A failed lookup leaves the zeroed record, so this prints all zeros.

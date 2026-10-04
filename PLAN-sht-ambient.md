@@ -156,7 +156,7 @@ GND rail ───────────────────────�
 | junction | C1, 100 nF | GND rail |
 | junction | 30 AWG wire | ESP32 D34 (left pin 4) |
 
-Expected: unpowered, D34 to GND ≈ 100 kΩ (a bit less with the ESP32 input in parallel; may climb briefly while C1 charges). Powered, D34 ≈ half of VIN (~2.5 V). Pin numbers from the standard DevKit V1 layout; check the board's silkscreen.
+Expected: unpowered, D34 to GND somewhere between ~50 and ~100 kΩ (the meter sees R2 directly and R1 through VIN and the ESP32 board's circuits; may climb briefly while C1 charges); the real check is "not near 0 Ω". Powered, D34 ≈ half of VIN (~2.5 V). Pin numbers from the standard DevKit V1 layout; check the board's silkscreen.
 
 
 The wiring notes go into the repo as `sht-compare/WIRING.md` and `ambient/WIRING.md`.
@@ -202,9 +202,9 @@ Each stage lists what's **new** and its **pass check**. Don't start the next sta
 | 11 | **code:** mux entries in table | stage-10 wiring | all 6 logged together overnight; analyze |
 | 12 | **code:** `common/wifi` + `ambient` as a UDP client: status line pushed every 10 s, `udp_listener.py` acks with UTC; joins the strongest access point | nothing wired | **passed 2026-10-03 on board 2:** connects; acks every 10 s; listener stopped/restarted with no reboot; router restart → reconnects with no reboot; fresh start picks the stronger access point |
 | 12b | **code + meter:** deep-sleep current of a bare dev board (board 3, the spare: a minimal program that goes straight to deep sleep) | nothing wired | current from the 5 V supply measured awake and asleep. Decides whether a dev board can run on solar, or needs trimming (LEDs) or a bare module |
-| 12a | **wiring:** AMS1117 module input from ESP32 VIN, ground shared, nothing on the module's output yet; 220 µF 25 V capacitor across VIN–GND; 2 × 100 kΩ divider from VIN to GPIO 34 plus 100 nF across the lower resistor (divider and capacitor away from the ESP32, 30 AWG lead to GPIO 34). Powered through the USB socket only. (Done first: VIN on USB alone, board 2 read 5.06–5.09 V → no diode.) | meter only; stage-12 code | ESP32 boots and its pushes reach the listener; VIN ≥ 4.75 V while it sends over WiFi; 3.3 V (±2%) at the module output, also during WiFi; GPIO 34 reads about half of VIN; same on the USB-A charger and on the laptop. The pass-through and USB inline meter are added when the box is built |
+| 12a | **wiring:** AMS1117 module input from ESP32 VIN, ground shared, nothing on the module's output yet; 220 µF 25 V capacitor across VIN–GND; 2 × 100 kΩ divider from VIN to GPIO 34 plus 100 nF across the lower resistor (divider and capacitor away from the ESP32, 30 AWG lead to GPIO 34). Powered through the USB socket only. (Done first: VIN on USB alone, board 2 read 5.06–5.09 V → no diode.) | meter only; stage-12 code | ESP32 boots and its pushes reach the listener; VIN ≥ 4.75 V while it sends over WiFi; 3.3 V (±2%) at the module output, also during WiFi; GPIO 34 reads about half of VIN; same on the USB-A charger and on the laptop. The pass-through and USB inline meter are added when the box is built. **Passed 2026-10-04 on board 2:** unpowered VIN–GND and module out–GND open, capacitor stripe on GND; charger: VIN 5.01 V, D34 2.49 V (49.7%); desktop USB (stood in for the laptop): VIN 5.06–5.09 V, D34 2.534 V (49.8%), module out 3.298 / 3.31 V; pushes steady throughout. Not measured: module output on the charger. Divider alone 199.5 kΩ, R1 99.7 kΩ |
 | 12c | **code:** settings store (NVS) + serial console with the bench commands; settings apply immediately and survive a reboot | stage-12a node | each command in the list works on the serial console; `config` changes survive `reboot`; `config push` changes the status-push rate live; opening the console with the terminal set not to toggle reset lines leaves the logger running |
-| 12d | **code:** supply-voltage reading in `status` and in each push | stage-12c node | reading within ±2% of the meter at VIN, on the USB-A wall charger and on the laptop |
+| 12d | **code:** supply-voltage reading in `status` and in each push | stage-12c node | reading within ±2% of the meter at VIN, on the USB-A wall charger and on the laptop; a low-threshold crossing (threshold temporarily set just above the normal reading) writes a log entry. The listener's low-supply alert comes with stage 22 |
 | 13 | **wiring:** DS3231 board on bus 0, powered from the AMS1117 module | i2c-scan | finds 0x68 (and 0x57 if the board has the memory chip) |
 | 14 | **code:** `common/ds3231` + a `time` / `settime` command in `ambient` | stage-13 wiring | time set from the PC reads back; still correct after unplugging the ESP32 for a few minutes |
 | 15 | **wiring:** SD card board on SPI (D18/D19/D23/D4) | meter only | 3.3 V at the card's supply pin (or 5 V at the board's input if it has its own regulator); no shorts between the four signal lines |
@@ -261,6 +261,8 @@ Bench only: a wrong listener address or WiFi password sent remotely would cut th
 
 **Silence alert at the collector:** the listener alerts when no push arrives from the logger for about two push intervals inside the push window. The usual response: plug in USB at the logger and read `log`. How the alert reaches the user (desktop notification on dev10, email, or a log line) is not yet chosen.
 
+**Low-supply handling (wall power):** the supply voltage is in every record and push, so trends show at the listener (a weakening charger, a connection going bad). Crossing a low threshold writes a problem-log entry on the logger, so `log` after a crash or brownout restart shows whether the supply sagged first. The listener alerts when pushes report the supply below a threshold, like the silence alert. Thresholds (perhaps ~4.6 V) are set after normal values have been seen, not guessed now.
+
 Each push also carries health information: last reset reason (power-on, crash, watchdog, brownout), WiFi connect time and push duration (the real radio-on cost, for solar sizing), error counts since boot (sensor reads, SD writes, push failures), clock offset at each ack and whether it was corrected, and free memory.
 
 ## Boiling-point calibration support
@@ -281,6 +283,7 @@ A goal since 2026-10-02: the user wants these projects on battery-backed solar p
 3. **Build** a small solar setup (panel, charge controller with low-voltage load disconnect, battery, 12 V → 5 V step-down converter such as a car USB charger) feeding the same USB cable. Run it beside the wall-charger data through cloudy stretches.
 
 Design notes:
+- **Low-supply protection on solar**, in order as the voltage falls: (1) skip WiFi pushes but keep sampling, the backlog holds the data; (2) stop SD writes before the voltage can corrupt the card's file system (a brownout mid-write can damage it; the most important step); (3) sleep until the voltage recovers, checking at each wake. Thresholds come from measuring what the AMS1117 and SD card actually tolerate.
 - Before running on solar, check the supply-voltage reading across a range (e.g. 4.5–5.5 V fed through a USB cable from a bench supply), set aside from stage 12d.
 - Never feed 12 V to the AMS1117 or the ESP32's VIN; everything after the 5 V step-down stays as it is.
 - Always-on WiFi is roughly 0.5–1 W (12–24 Wh/day): a large battery and panel for cloudy winter days. Sleeping between readings, with WiFi only for pushes inside the push window, cuts that by a large factor.

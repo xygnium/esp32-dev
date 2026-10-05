@@ -156,3 +156,26 @@ Notes:
 - **Not yet shown:** that the A0-minus-A1 setting responds to a real voltage. All-zero readings fit a quiet chip with a shorted input, but would also fit a dead channel.
 - **Differences from the plan:** 1h reports standard deviation as well as mean, min/max and spread, and repeats every block. The A0-minus-A1 runs were added to find the source of the offset. `main.c` keeps the 1f test too, chosen with `TEST_NOISE`; `NOISE_MUX` picks the noise test's input.
 - **Field codes** for the ±0.256 V range and A0-minus-A1 are recalled, not checked against the datasheet. The Config read-backs match what was written, and the −85 µV here agrees with the −1 step seen on the ±4.096 V range.
+
+## ADS1115 boards: stage 1h2 (all four inputs), 2026-10-04
+
+Why: an Amazon review of these boards reported A2 and A3 dead and suspected an ADS1114, which has only the A0/A1 pair. Every earlier stage used only A0 and A1.
+
+Method: `TEST_INPUTS`. A0, A1, A2, A3 each read against ground (±4.096 V, 8 per second), four voltages printed about once a second. Pot across 3V3/GND; wiper moved to each input in turn with the program running; the other three inputs unconnected. Library at `ads1115-dev` e3065ef. Readings as reported from the console by eye, not captured to a file.
+
+| wiper on | A0 column | A1 column | A2 column | A3 column |
+|---|---|---|---|---|
+| A0 | follows the pot (odd and even values) | 582–583 mV | 582–583 mV | 582–583 mV |
+| A1 | 582.2–582.4 mV | follows the pot | 582.1–582.2 mV | 582.1–582.2 mV |
+| A2 | not noted | not noted | follows the pot | not noted |
+| A3 | not noted | not noted | not noted | follows the pot |
+
+| board | A0 | A1 | A2 | A3 | verdict |
+|---|---|---|---|---|---|
+| ADS-A | follows | follows | follows | follows | pass: four independent inputs, not an ADS1114 |
+| ADS-B | — | — | — | — | pending |
+| ADS-C | — | — | — | — | pending |
+
+Notes:
+- **Unconnected inputs sit at about 582 mV**, steady to a few tenths of a mV, and don't copy the driven input.
+- **Not recorded:** the four Config read-back lines printed at start (`A0:` to `A3:`), and the pot's end-to-end voltages on each input.

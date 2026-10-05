@@ -11,6 +11,12 @@
 //   min/max, spread and standard deviation. NOISE_MUX picks the input:
 //   ADS_MUX_A0_GND with A0 jumpered to GND, or ADS_MUX_A0_A1 with A0 jumpered
 //   to A1 (leaves ground wiring out of the reading).
+// 1h2, inputs (TEST_INPUTS): PGA ±4.096 V, 8 SPS. Reads A0, A1, A2 and A3 against
+//   GND about once a second and prints the four voltages on one line. Move the
+//   pot wiper from input to input: on a genuine ADS1115 only that input's column
+//   follows the pot. An ADS1114 has no A2/A3 (and no input selection), so those
+//   columns can't follow their own pins. Unconnected inputs float and may read
+//   anything.
 // I2C bus 0: SDA = D21, SCL = D22. ADS at 0x48 (ADDR pulled low on the board).
 #include <inttypes.h>
 #include <math.h>
@@ -28,7 +34,8 @@
 #define TEST_TIMING     1
 #define TEST_RESOLUTION 2
 #define TEST_NOISE      3
-#define TEST            TEST_TIMING
+#define TEST_INPUTS     4
+#define TEST            TEST_INPUTS
 
 #define I2C_PORT   0
 #define PIN_SDA    GPIO_NUM_21
@@ -221,6 +228,31 @@ static void noise_test(const ads_hal_t *ads)
     }
 }
 
+static void inputs_test(const ads_hal_t *ads)
+{
+    static const unsigned mux[4] = { ADS_MUX_A0_GND, ADS_MUX_A1_GND, ADS_MUX_A2_GND, ADS_MUX_A3_GND };
+
+    // Config read-back per input: shows whether the chip keeps each MUX setting.
+    for (int ch = 0; ch < 4; ch++) {
+        printf("A%d: ", ch);
+        check_config(ads, mux[ch], ADS_PGA_4V096);
+    }
+    printf("\n     A0 mV      A1 mV      A2 mV      A3 mV\n");
+    for (;;) {
+        for (int ch = 0; ch < 4; ch++) {
+            int16_t code;
+            int err = ads_convert(ads, mux[ch], ADS_PGA_4V096, ADS_DR_8SPS, &code);
+            if (err != 0) {
+                printf("  FAIL(%2d) ", err);
+            } else {
+                printf("%10.1f ", code * LSB_UV / 1000.0);
+            }
+        }
+        printf("\n");
+        vTaskDelay(pdMS_TO_TICKS(500));
+    }
+}
+
 void app_main(void)
 {
     i2c_master_bus_handle_t bus;
@@ -229,12 +261,15 @@ void app_main(void)
     ESP_ERROR_CHECK(ads_port_device_init(bus, ADS_ADDR, SCL_HZ, &ads));
 
     printf("test: %s\n", TEST == TEST_TIMING ? "timing (1d)"
-                          : TEST == TEST_RESOLUTION ? "resolution (1f)" : "noise (1h)");
+                          : TEST == TEST_RESOLUTION ? "resolution (1f)"
+                          : TEST == TEST_NOISE ? "noise (1h)" : "inputs (1h2)");
     if (TEST == TEST_TIMING) {
         timing_test(bus, &ads);
     } else if (TEST == TEST_RESOLUTION) {
         resolution_test(&ads);
-    } else {
+    } else if (TEST == TEST_NOISE) {
         noise_test(&ads);
+    } else {
+        inputs_test(&ads);
     }
 }

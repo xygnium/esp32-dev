@@ -31,7 +31,7 @@ Run these from the project directory, e.g. `thermistor-cal/`.
 | `build.sh` | `idf.py build` (cmake + ninja into `build/`) | `wbuild.sh` / `xbuild.sh` (cmake + make) |
 | `flash.sh` | `idf.py -p /dev/ttyUSB0 flash` (esptool over USB serial) | `load_*.sh` (OpenOCD over SWD, with sudo) |
 | `flash-check.sh` | flash, keep the full log in `build/flash-check.log`, print a summary (crystal, writes, hash checks) | — |
-| `monitor.sh` | `idf.py -p /dev/ttyUSB0 monitor`; **exit with Ctrl-]** | `start_minicom.sh` |
+| `monitor.sh` | `idf.py -p /dev/ttyUSB0 monitor`; **exit with Ctrl-]**. `ambient` and `blink` add `--no-reset` (the board keeps running). `thermistor-cal` resets the board at open and saves the console to `build/monitor.log` | `start_minicom.sh` |
 
 ## Project layout
 

@@ -12,6 +12,9 @@
 // Status line: hello seq=<count> up=<seconds since boot> rssi=<dBm>
 //              ap=<access point MAC> ip=<own address> mac=<own MAC>
 //              reconnects=<times WiFi was regained> push_s=<interval>
+//              vin_mv=<supply voltage, mV; 0 if unavailable>
+// The supply voltage is read just before each push and checked against the
+// low-supply threshold (supply.c); from stage 20 it's read at every sample.
 // A missing reply is counted and logged; nothing is resent.
 
 #include <inttypes.h>
@@ -27,6 +30,7 @@
 #include "ambient.h"
 #include "console_cmds.h"
 #include "settings.h"
+#include "supply.h"
 #include "wifi.h"
 
 #define CONNECT_TIMEOUT_MS 30000
@@ -98,13 +102,16 @@ static void record(push_result_t r, uint32_t seq, const char *reply)
 
 static void push_once(const settings_t *cfg, const char *mac, uint32_t seq)
 {
+    uint32_t vin_mv = 0;
+    supply_check(cfg->low_mv, &vin_mv);     // leaves 0 if no reading
+
     if (!wifi_is_connected()) {
         ESP_LOGW(TAG, "seq %" PRIu32 ": not connected", seq);
         record(PUSH_NOT_CONNECTED, seq, NULL);
         return;
     }
 
-    char ip[16], bssid[18], msg[176], reply[128];
+    char ip[16], bssid[18], msg[192], reply[128];
     size_t reply_len = 0;
     int rssi = 0;
     wifi_ip_str(ip, sizeof(ip));
@@ -112,9 +119,9 @@ static void push_once(const settings_t *cfg, const char *mac, uint32_t seq)
     wifi_bssid_str(bssid, sizeof(bssid));
     int len = snprintf(msg, sizeof(msg),
                        "hello seq=%" PRIu32 " up=%" PRIu64 " rssi=%d ap=%s ip=%s mac=%s reconnects=%" PRIu32
-                       " push_s=%" PRIu32,
+                       " push_s=%" PRIu32 " vin_mv=%" PRIu32,
                        seq, (uint64_t)(esp_timer_get_time() / 1000000), rssi, bssid, ip, mac,
-                       wifi_reconnect_count(), cfg->push_s);
+                       wifi_reconnect_count(), cfg->push_s, vin_mv);
 
     int rc = wifi_udp_exchange(cfg->listener_host, cfg->listener_port, msg, len,
                                reply, sizeof(reply), &reply_len, REPLY_TIMEOUT_MS);
@@ -139,6 +146,7 @@ void app_main(void)
     // Settings first: NVS must be ready before WiFi starts, and a failure
     // here just means running on defaults.
     settings_init();
+    supply_init();
     settings_t cfg;
     settings_get(&cfg);
 

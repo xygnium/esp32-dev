@@ -15,6 +15,7 @@
 
 #include "ambient.h"
 #include "settings.h"
+#include "supply.h"
 #include "wifi.h"
 
 static const char *TAG = "console";
@@ -69,6 +70,37 @@ static bool parse_hhmm(const char *s, uint16_t *out_min)
         return false;
     }
     *out_min = (uint16_t)(h * 60 + m);
+    return true;
+}
+
+// Parse volts like "4.6" or "4.60" or "5" into millivolts.
+static bool parse_volts(const char *s, uint32_t *out_mv)
+{
+    unsigned whole = 0, frac = 0, frac_digits = 0;
+    const char *p = s;
+    if (*p < '0' || *p > '9') {
+        return false;
+    }
+    while (*p >= '0' && *p <= '9') {
+        whole = whole * 10 + (*p++ - '0');
+        if (whole > 99) return false;
+    }
+    if (*p == '.') {
+        p++;
+        while (*p >= '0' && *p <= '9') {
+            if (frac_digits == 3) return false;
+            frac = frac * 10 + (*p++ - '0');
+            frac_digits++;
+        }
+    }
+    if (*p != '\0') {
+        return false;
+    }
+    while (frac_digits < 3) {
+        frac *= 10;
+        frac_digits++;
+    }
+    *out_mv = whole * 1000 + frac;
     return true;
 }
 
@@ -148,6 +180,18 @@ static int cmd_status(int argc, char **argv)
     printf("pushes     ok %" PRIu32 ", no reply %" PRIu32 ", send failed %" PRIu32
            ", not connected %" PRIu32 "\n",
            ps.n_ok, ps.n_no_reply, ps.n_send_failed, ps.n_not_connected);
+    uint32_t vin_now;
+    supply_check(cfg.low_mv, &vin_now);       // fresh reading for this status
+    supply_state_t sup;
+    supply_get(&sup);
+    if (sup.valid) {
+        printf("supply     %lu.%02lu V%s (low below %lu.%02lu V; went low %lu times since boot; %s)\n",
+               (unsigned long)(sup.vin_mv / 1000), (unsigned long)(sup.vin_mv % 1000 / 10),
+               sup.low ? " LOW" : "", (unsigned long)(cfg.low_mv / 1000), (unsigned long)(cfg.low_mv % 1000 / 10),
+               (unsigned long)sup.n_low, supply_cal_name());
+    } else {
+        printf("supply     no reading yet\n");
+    }
     printf("settings   %s\n", settings_saved_to_flash() ? "saved in flash"
                                                        : "NOT saved: NVS unavailable, defaults in use");
     return 0;
@@ -181,6 +225,8 @@ static void config_print(void)
            cfg.window_start / 60, cfg.window_start % 60, cfg.window_end / 60, cfg.window_end % 60);
     printf("clock      %s   (used from stage 22)\n", cfg.clock_auto ? "auto" : "report");
     printf("listener   %s:%u\n", cfg.listener_host, cfg.listener_port);
+    printf("lowv       %lu.%02lu V   (supply-low threshold)\n", (unsigned long)(cfg.low_mv / 1000),
+           (unsigned long)(cfg.low_mv % 1000 / 10));
     printf("wifi       %s, password %s\n", cfg.wifi_ssid, cfg.wifi_pass[0] ? "set (hidden)" : "none");
 }
 
@@ -193,6 +239,7 @@ static int config_usage(void)
            "  config window <HH:MM> <HH:MM> push window in UTC; end before start wraps midnight\n"
            "  config clock auto|report      let the ack's time correct the clock, or only report\n"
            "  config listener <ip> <port>   where to push\n"
+           "  config lowv <volts>           supply-low threshold, e.g. 4.6 (3.0-5.5 V)\n"
            "  config wifi <ssid> <password> WiFi network; quote values with spaces, \"\" for none\n");
     return 1;
 }
@@ -254,6 +301,14 @@ static int cmd_config(int argc, char **argv)
         ambient_wake();
         return rc;
     }
+    if (strcmp(what, "lowv") == 0 && argc == 3) {
+        uint32_t mv;
+        if (!parse_volts(argv[2], &mv)) {
+            printf("not a voltage: %s\n", argv[2]);
+            return 1;
+        }
+        return report(settings_set_low_mv(mv));
+    }
     if (strcmp(what, "wifi") == 0 && argc == 4) {
         int rc = report(settings_set_wifi(argv[2], argv[3]));
         if (rc == 0) {
@@ -310,7 +365,7 @@ int console_start(void)
         { .command = "status", .help = "Running time, WiFi, listener, push results", .func = cmd_status },
         { .command = "info",   .help = "Firmware version, build date, MAC address",  .func = cmd_info },
         { .command = "config", .help = "Show or change settings; 'config' alone lists the forms",
-          .hint = "get | push | sample | window | clock | listener | wifi ...", .func = cmd_config },
+          .hint = "get | push | sample | window | clock | listener | lowv | wifi ...", .func = cmd_config },
         { .command = "push",   .help = "Push now, outside the schedule",              .func = cmd_push },
         { .command = "quiet",  .help = "Hide (on) or show (off) successful pushes on this console; on at boot",
           .hint = "[on|off]", .func = cmd_quiet },

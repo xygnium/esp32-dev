@@ -24,6 +24,7 @@ static const char *TAG = "settings";
 #define K_PORT      "lst_port"
 #define K_SSID      "wifi_ssid"
 #define K_PASS      "wifi_pass"
+#define K_LOWV      "low_mv"
 
 static settings_t s_cur;
 static SemaphoreHandle_t s_lock;
@@ -41,6 +42,7 @@ static void set_defaults(settings_t *s)
     s->window_start = 0;                  // 00:00-24:00 UTC: always, until a window is
     s->window_end = SETTINGS_DAY_MIN;     // set; not enforced before stage 22
     s->clock_auto = true;                 // dev10's clock is internet-synced, so trust the ack
+    s->low_mv = 4600;                     // provisional; set from normal readings (plan)
 }
 
 // --- validation: NULL when valid, else the reason ---
@@ -103,6 +105,12 @@ static const char *check_port(uint32_t port)
     return (port == 0 || port > 65535) ? "port must be 1-65535" : NULL;
 }
 
+static const char *check_low_mv(uint32_t v)
+{
+    return (v < SETTINGS_LOWV_MIN_MV || v > SETTINGS_LOWV_MAX_MV)
+               ? "low-supply threshold must be 3.0-5.5 V" : NULL;
+}
+
 static const char *check_wifi(const char *ssid, const char *pass)
 {
     size_t sl = strlen(ssid), pl = strlen(pass);
@@ -143,6 +151,7 @@ static void load_saved(void)
 
     load_u32(h, K_PUSH, &s_cur.push_s, check_push);
     load_u32(h, K_SAMPLE, &s_cur.sample_s, check_sample);
+    load_u32(h, K_LOWV, &s_cur.low_mv, check_low_mv);
 
     uint16_t ws, we;
     if (nvs_get_u16(h, K_WIN_START, &ws) == ESP_OK && nvs_get_u16(h, K_WIN_END, &we) == ESP_OK) {
@@ -233,6 +242,7 @@ static const char *save_locked(void)
     esp_err_t err = ESP_OK;
     if (err == ESP_OK) err = nvs_set_u32(h, K_PUSH, s_cur.push_s);
     if (err == ESP_OK) err = nvs_set_u32(h, K_SAMPLE, s_cur.sample_s);
+    if (err == ESP_OK) err = nvs_set_u32(h, K_LOWV, s_cur.low_mv);
     if (err == ESP_OK) err = nvs_set_u16(h, K_WIN_START, s_cur.window_start);
     if (err == ESP_OK) err = nvs_set_u16(h, K_WIN_END, s_cur.window_end);
     if (err == ESP_OK) err = nvs_set_u8(h, K_CLOCK, s_cur.clock_auto ? 1 : 0);
@@ -312,6 +322,17 @@ const char *settings_set_wifi(const char *ssid, const char *pass)
     xSemaphoreTake(s_lock, portMAX_DELAY);
     strlcpy(s_cur.wifi_ssid, ssid, sizeof(s_cur.wifi_ssid));
     strlcpy(s_cur.wifi_pass, pass, sizeof(s_cur.wifi_pass));
+    const char *r = save_locked();
+    xSemaphoreGive(s_lock);
+    return r;
+}
+
+const char *settings_set_low_mv(uint32_t mv)
+{
+    const char *bad = check_low_mv(mv);
+    if (bad) return bad;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_cur.low_mv = mv;
     const char *r = save_locked();
     xSemaphoreGive(s_lock);
     return r;

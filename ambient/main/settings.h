@@ -17,6 +17,8 @@
 #define SETTINGS_SAMPLE_MIN_S   1u
 #define SETTINGS_SAMPLE_MAX_S   3600u
 #define SETTINGS_DAY_MIN        1440u    // minutes in a day; 24:00
+#define SETTINGS_LOWV_MIN_MV    3000u
+#define SETTINGS_LOWV_MAX_MV    5500u
 
 typedef struct {
     char wifi_ssid[33];       // 1-32 characters
@@ -28,6 +30,7 @@ typedef struct {
     uint16_t window_start;    // push window, minutes after 00:00 UTC (0-1439)
     uint16_t window_end;      // minutes after 00:00 UTC (1-1440); end < start wraps past midnight
     bool clock_auto;          // true: the ack's time corrects the clock; false: only reported
+    uint32_t low_mv;          // supply-low threshold for VIN, mV
 } settings_t;
 
 // Initialise NVS and load the saved settings over the defaults. Call once,
@@ -51,5 +54,6 @@ const char *settings_set_window(uint16_t start_min, uint16_t end_min);
 const char *settings_set_clock_auto(bool on);
 const char *settings_set_listener(const char *host, uint16_t port);
 const char *settings_set_wifi(const char *ssid, const char *pass);
+const char *settings_set_low_mv(uint32_t mv);
 
 #endif

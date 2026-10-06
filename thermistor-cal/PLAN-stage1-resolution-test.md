@@ -10,6 +10,8 @@
 
 `thermistor-cal` pulls in `ads1115_core/` and `ports/ads1115_idf/` through `EXTRA_COMPONENT_DIRS`, pointing at the **sibling checkout** `~/dev/github/ads1115-dev` by relative path. No submodule for now. Stage 1j comes back to that question. No code is moved or copied from other repos. Only the three-line build/flash/monitor script pattern is copied from `blink/`.
 
+The calibration itself (fixed points, probe preparation, the Glauber's salt run, parts on hand) is written up in `ads1115-dev/DESIGN.md`, Calibration. Read that before planning any calibration stage here.
+
 ## Goal
 
 Prove each Lonely Binary board has a genuine ADS1115 (16-bit), not a relabelled ADS1015 (12-bit). This is arrival check 2 in `ads1115-dev/DESIGN.md`. Checks 3–5 (noise floor, pull-ups, address) come along with it.
@@ -66,7 +68,7 @@ Code and wiring alternate, so a failure points at one or the other. Each stage s
 | 1h | **code** | Noise mode: PGA **±0.256 V**, 100 readings at 8 SPS. Print mean, min/max and spread. | Spread of a few LSB (1 LSB = 7.8 µV). Record it as this board's noise floor. |
 | 1h2 | **code + wiring** | Inputs test (`TEST_INPUTS`): read A0, A1, A2, A3 against GND at PGA ±4.096 V, print the four voltages about once a second. Pot wiper moved to each input in turn. Added 2026-10-04 after an Amazon review of these boards reported A2/A3 dead and suspected an ADS1114 (which has only the A0/A1 pair). Every stage before this used only A0 and A1. | With the wiper on an input, that column follows the pot (~0–3.3 V) and the others don't. A2 or A3 not following its own pin → the board can't carry 3 thermistors + excitation monitor; set it aside. |
 | 1i | **repeat** | Each remaining board: 1b, 1c, 1d, 1f, 1h, 1h2. 1h2 also on ADS-A. Label each (ADS-A, ADS-B, ADS-C) with its results. | All pass, or the fake is set aside. |
-| 1j | **review** | Revisit a git submodule vs the sibling path, now that the library has real code and history. Weigh: does `esp32-dev` need to build without the sibling? Has a library change broken, or nearly broken, a build? Is the pointer-bump overhead worth pinning? Decide, and switch only if it pays. | A decision, recorded in `ads1115-dev/DESIGN.md`. |
+| 1j | **review** | Revisit a git submodule vs the sibling path, now that the library has real code and history. Weigh: does `esp32-dev` need to build without the sibling? Has a library change broken, or nearly broken, a build? Is the pointer-bump overhead worth pinning? Decide, and switch only if it pays. | A decision, recorded in `ads1115-dev/DESIGN.md`. **Decided 2026-10-05:** stay with the sibling path, no submodule yet. Revisit when a second project depends on the library (the `pico-dev` rework), when calibration results need an exact library version, or if a library change breaks a build. |
 
 Out of scope for stage 1: address strapping (0x49–0x4B) and multiple boards on one bus.
 

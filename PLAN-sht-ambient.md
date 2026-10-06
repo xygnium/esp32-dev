@@ -142,7 +142,7 @@ SD card board (SPI):
 
 | SD board pin | Goes to | Notes |
 |---|---|---|
-| VCC (or 5V / 3V3) | VIN (5 V) if it has a regulator, AMS1117 3.3 V if not | wire as on the Pico logger (uncertainty 10) |
+| VCC (or 5V / 3V3) | AMS1117 3.3 V | as on the Pico logger (user, 2026-10-05) |
 | GND | GND rail | |
 | SCK / CLK | D18 | |
 | MISO / DO | D19 | |
@@ -203,14 +203,14 @@ Connections per point on the warm-box board:
 
 | Point | Connections |
 |---|---|
-| 3.3 V (AMS1117 out) | DS3231, BMP388, SHT45 cable, sidecar header (+ SD if 3.3 V) |
+| 3.3 V (AMS1117 out) | DS3231, BMP388, SHT45 cable, sidecar header, SD |
 | GND | SD, DS3231, BMP388, SHT45 cable, sidecar header, AMS1117, 220 µF, divider |
 | D21 (SDA) | DS3231, BMP388, SHT45 cable, sidecar header |
 | D22 (SCL) | DS3231, BMP388, SHT45 cable, sidecar header |
 | D18, D19, D23, D4 | SD card only |
 | D34 | supply-voltage divider |
 | D25 | sidecar header |
-| VIN (5 V) | AMS1117, 220 µF, divider (+ SD if 5 V type) |
+| VIN (5 V) | AMS1117, 220 µF, divider |
 
 **Supply-voltage divider (stage 12a)**
 
@@ -283,9 +283,10 @@ Each stage lists what's **new** and its **pass check**. Don't start the next sta
 | 12a | **wiring:** AMS1117 module input from ESP32 VIN, ground shared, nothing on the module's output yet; 220 µF 25 V capacitor across VIN–GND; 2 × 100 kΩ divider from VIN to GPIO 34 plus 100 nF across the lower resistor (divider and capacitor away from the ESP32, 30 AWG lead to GPIO 34). Powered through the USB socket only. (Done first: VIN on USB alone, board 2 read 5.06–5.09 V → no diode.) | meter only; stage-12 code | ESP32 boots and its pushes reach the listener; VIN ≥ 4.75 V while it sends over WiFi; 3.3 V (±2%) at the module output, also during WiFi; GPIO 34 reads about half of VIN; same on the USB-A charger and on the laptop. The pass-through and USB inline meter are added when the box is built. **Passed 2026-10-04 on board 2:** unpowered VIN–GND and module out–GND open, capacitor stripe on GND; charger: VIN 5.01 V, D34 2.49 V (49.7%); desktop USB (stood in for the laptop): VIN 5.06–5.09 V, D34 2.534 V (49.8%), module out 3.298 / 3.31 V; pushes steady throughout. Not measured: module output on the charger. Divider alone 199.5 kΩ, R1 99.7 kΩ |
 | 12c | **code:** settings store (NVS) + serial console with the bench commands; settings apply immediately and survive a reboot | stage-12a node | each command in the list works on the serial console; `config` changes survive `reboot`; `config push` changes the status-push rate live; opening the console with the terminal set not to toggle reset lines leaves the logger running. **Passed 2026-10-04 on board 2** (commands: help, status, info, config, push, quiet, reboot): live push-rate change; settings survive `reboot`; bad input refused with nothing changed; a bad saved value falls back to its default at boot. Bug found and fixed: the listener-address check accepted shorthand like "1.2.3" (lwIP's parser); now exactly four numbers 0–255. **Not yet met:** opening the console without restarting the board (pyserial restarts it; try `idf.py monitor --no-reset`, uncertainty 24). **Untested:** `config wifi` (needs the real password to restore; user to try a wrong password, then the right one) |
 | 12d | **code:** supply-voltage reading in `status` (fresh reading each time) and in each push (`vin_mv=`), ESP-IDF ADC with eFuse-reference calibration, 16-sample average; low-supply watch with `config lowv` (warning on going low and on recovering, 50 mV margin; count in `status`) | stage-12c node | reading within ±2% of the meter at VIN, on the USB-A wall charger and on the laptop; a low-threshold crossing (threshold temporarily set just above the normal reading) writes a log entry. The listener's low-supply alert comes with stage 22 **Passed 2026-10-04 on board 2:** desktop USB meter 5.09 V / logger 5.11 V (+0.4%); USB-A charger meter 5.00 V / logger 5.018 V (+0.4%); steady across readings; `config lowv 5.2` gave one "supply low" warning and count 1, no repeat while low; back to 4.6 V gave "supply recovered"; out-of-range and non-numeric thresholds refused. Being near the top of the ADC range (uncertainty 27) didn't hurt at 5 V. |
+| 12e | **wiring:** 5-pin sidecar header on the perf board (pin 1 3.3 V from the AMS1117, 2 GND, 3 SDA D21, 4 SCL D22, 5 EXC D25; see the header table). The GND pin gets its own wire to the board's ground point. Added 2026-10-05; needs only stage 12a's wiring, so it can be done before or after stages 13–19 | meter, then `thermistor-cal` flashed on board 2 with an ADS1115 board plugged into the header | Unpowered: each pin has continuity to its point and none to its neighbours. Powered: 3.3 V (±2%) at pin 1. With the ADS board plugged in: scan finds 0x48; the stage 1h noise test (A0 to module ground, ±0.256 V) is repeated and the offset recorded in `thermistor-cal/BOARDS.md` (uncertainty 28). Pin 5 is checked for continuity only here; driving it comes with the thermistor reading code. Reflash `ambient` afterwards (settings in NVS survive) |
 | 13 | **wiring:** DS3231 board on bus 0, powered from the AMS1117 module | i2c-scan | finds 0x68 (and 0x57 if the board has the memory chip) |
 | 14 | **code:** `common/ds3231` + a `time` / `settime` command in `ambient` | stage-13 wiring | time set from the PC reads back; still correct after unplugging the ESP32 for a few minutes |
-| 15 | **wiring:** SD card board on SPI (D18/D19/D23/D4) | meter only | 3.3 V at the card's supply pin (or 5 V at the board's input if it has its own regulator); no shorts between the four signal lines |
+| 15 | **wiring:** SD card board on SPI (D18/D19/D23/D4) | meter only | 3.3 V at the board's supply pin; no shorts between the four signal lines |
 | 16 | **code:** `sd-probe` | stage-15 wiring | with the 32 GB SDHC card: mounts; file written, read back identical; survives a reboot (and, if wanted, the same with a 128 MB SDSC card) |
 | 17 | **wiring:** generic BMP388 on bus 0, SDO tied for 0x77 | i2c-scan | finds 0x77 alongside 0x68 |
 | 18 | **code:** `common/bmp388` | stage-17 wiring | chip ID reads 0x50; pressure agrees with a nearby weather station reduced to station pressure, within the sensor's ±0.5 hPa |
@@ -380,7 +381,7 @@ Settings stay in flash (NVS, stage 12c), which is written only on `config` comma
 
 ## Boiling-point calibration support
 
-The ambient logger is the barometer for the thermistor boiling-point calibration (ads1115-dev `DESIGN.md`, Calibration). Decided 2026-10-02:
+The ambient logger is the barometer for the thermistor boiling-point calibration (ads1115-dev `DESIGN.md`, Calibration). The whole calibration procedure is kept there, not here: the three fixed points, probe preparation (silicone-coated leads and the lead extension), and the Glauber's salt run (batch size, fermentation box, stirring, checks). Decided 2026-10-02:
 
 - **Order:** the boil comes after stage 20 at the earliest (BMP388 read on a timer with clock timestamps). Ice and Glauber's salt points don't need pressure and can run any time.
 - **Where:** indoors, on a calm, settled-weather day, with range hood, bath fan, dryer and furnace blower off. The vessel stays open. The ambient logger sits on the counter in the same room on any USB charger, at roughly pot height (1 m of height ≈ 0.003 °C). No outdoor boil and no extra portability needed; indoor/outdoor and fan-effect checks were considered and skipped.
@@ -423,7 +424,7 @@ Design notes:
 7. **The dev10 collector/container side** can't be tested from this VM.
 8. **Record layout.** The temp-sense protocol carries each reading as a 2-byte number with temperature in 1/16 °C steps (0.06 °C), too coarse for checking against the calibrated thermistors. Settled for the SD record (see SD card contents: 0.01 °C, 0.01 % RH, 1 Pa); the push packet format follows at stage 22.
 9. **Clock setting.** Each logger's DS3231 drifts ~1 min/year (±2 ppm rated), which is fine. The risk is the initial setting: the attic Pico's clock date was last recorded as unset. Both clocks must be set from the same source. The same applies to the thermistor rig if its boil readings are matched to the ambient logger's pressure by time.
-10. **Spare parts on hand:** answered 2026-10-04: a DS3231 board and an SD card board are on hand, the same types used on the Pico logger (proven parts). Still to note: which supply voltage the SD board gets on the Pico (3.3 V or 5 V), to wire it the same way at stage 15.
+10. **Spare parts on hand:** answered 2026-10-04: a DS3231 board and an SD card board are on hand, the same types used on the Pico logger (proven parts). The SD board gets 3.3 V on the Pico (user, 2026-10-05), so it is fed from the AMS1117 here at stage 15.
 11. **FatFs on ESP-IDF:** ESP-IDF uses the same FatFs file library as the Pico code, but how directly temp-sense's `f_*` calls carry over (vs. going through ESP-IDF's file layer) is unchecked.
 12. **BMP388 facts are from memory:** address 0x77 with SDO high (0x76 with SDO low), chip ID 0x50, CSB high selects I2C, ±0.5 hPa absolute. The generic board's pin labels, pull-ups and regulator are unknown until it's in hand. Check against the datasheet at stage 17.
 13. **Heat and airflow:** the warm box's heat must not reach the open box; spacing and which one sits higher (warm air rises) are not yet decided. The open box's design (vent openings, sun and rain protection) is not yet described in this plan; it decides how fast the SHT45 follows outside air. Stage 23/25 should compare readings with the open box open vs. closed.

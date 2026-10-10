@@ -143,6 +143,11 @@ void app_main(void)
 {
     s_loop_task = xTaskGetCurrentTaskHandle();
 
+    // ESP-IDF's own messages are built at warnings-and-errors only (see
+    // sdkconfig.defaults); the app's informational lines are turned back on.
+    esp_log_level_set("ambient", ESP_LOG_INFO);
+    esp_log_level_set("supply", ESP_LOG_INFO);
+
     // Settings first: NVS must be ready before WiFi starts, and a failure
     // here just means running on defaults.
     settings_init();
@@ -159,6 +164,10 @@ void app_main(void)
     } else if (wrc == -2) {
         // Carry on: later stages keep logging to the SD card without WiFi.
         ESP_LOGE(TAG, "WiFi setup failed; continuing without WiFi");
+    } else {
+        char ip[16];
+        wifi_ip_str(ip, sizeof(ip));
+        ESP_LOGI(TAG, "WiFi connected, address %s", ip);
     }
     char mac[18];
     wifi_mac_str(mac, sizeof(mac));

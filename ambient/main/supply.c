@@ -27,40 +27,68 @@ static supply_state_t s_state;
 
 int supply_init(void)
 {
+    // Setup can fail at three calls; any of them leaves the logger without
+    // supply readings until the next restart (there is no retry).
     adc_unit_t unit;
+    // Case 1: SUPPLY_GPIO is not an ADC-capable pin.
     esp_err_t err = adc_oneshot_io_to_channel(SUPPLY_GPIO, &unit, &s_chan);
     if (err == ESP_OK) {
+        // Case 2: the ADC unit is already claimed (supply_init called twice,
+        // or other code opened it first), or no memory.
         adc_oneshot_unit_init_cfg_t ucfg = { .unit_id = unit };
         err = adc_oneshot_new_unit(&ucfg, &s_adc);
     }
     if (err == ESP_OK) {
+        // Case 3: the channel, attenuation or bit width is not valid.
         // 12 dB attenuation: the widest input range (to about 3.1 V).
         adc_oneshot_chan_cfg_t ccfg = { .atten = ADC_ATTEN_DB_12, .bitwidth = ADC_BITWIDTH_DEFAULT };
         err = adc_oneshot_config_channel(s_adc, s_chan, &ccfg);
     }
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "ADC setup failed: %s; no supply readings", esp_err_to_name(err));
+        ESP_LOGE(TAG, "ESP32 onboard ADC is DOA (setup failed: %s); no supply readings", esp_err_to_name(err));
         return -1;
     }
 
-    // Calibration from the reference voltage burnt into this chip's eFuse
-    // (esptool reported "Vref calibration in eFuse" for board 2). Without it
-    // the conversion falls back to a nominal reference: less accurate, still
-    // usable.
+    // Calibration: every ESP32's ADC is off by a slightly different amount,
+    // so the factory measures each chip and stores a correction in its eFuse.
+    // The steps below build a raw-count-to-millivolt converter from that
+    // correction. A failure here is not fatal: readings still work, only
+    // less accurately.
+
+    // What the converter is for. Unit, attenuation and bit width must match
+    // the channel setup above. default_vref is the typical reference voltage
+    // (mV), used only if the chip has no correction stored.
     adc_cali_line_fitting_config_t cal = {
         .unit_id = unit,
         .atten = ADC_ATTEN_DB_12,
         .bitwidth = ADC_BITWIDTH_DEFAULT,
         .default_vref = 1100,
     };
+
+    // Ask which correction this chip has stored, then build the converter.
+    // src comes back as one of:
+    //   two-point  readings at two known voltages; the most accurate
+    //   Vref       the chip's measured reference voltage (board 2 has this,
+    //              per esptool: "Vref calibration in eFuse")
+    //   default    nothing stored; assumes a typical chip (default_vref)
     adc_cali_line_fitting_efuse_val_t src = ADC_CALI_LINE_FITTING_EFUSE_VAL_DEFAULT_VREF;
     if (adc_cali_scheme_line_fitting_check_efuse(&src) == ESP_OK &&
         adc_cali_create_scheme_line_fitting(&cal, &s_cali) == ESP_OK) {
+        // Remember which one was used; `status` shows it beside the voltage.
         s_cal_name = src == ADC_CALI_LINE_FITTING_EFUSE_VAL_EFUSE_TP   ? "eFuse two-point"
                    : src == ADC_CALI_LINE_FITTING_EFUSE_VAL_EFUSE_VREF ? "eFuse Vref"
                                                                          : "default Vref";
+        // Plain verdict at boot: OK with the factory's correction for this
+        // chip, TOLERABLE when a typical chip is assumed.
+        if (src == ADC_CALI_LINE_FITTING_EFUSE_VAL_DEFAULT_VREF) {
+            ESP_LOGW(TAG, "ESP32 onboard ADC is TOLERABLE (%s)", s_cal_name);
+        } else {
+            ESP_LOGI(TAG, "ESP32 onboard ADC is OK (%s)", s_cal_name);
+        }
     } else {
-        ESP_LOGW(TAG, "no ADC calibration; supply readings will be rough");
+        // No converter: read_pin_mv() falls back to a nominal full-scale
+        // conversion.
+        ESP_LOGW(TAG, "ESP32 onboard ADC is SHIT (no calibration)");
         s_cali = NULL;
     }
     s_ok = true;

@@ -3,8 +3,6 @@
 // For each bus: first reads both lines as plain inputs (with the ESP32's weak
 //   pull-ups on) and reports a line held low at idle, then probes every address
 //   0x08-0x77 and prints the ones that answer.
-// If 0x70 answers it is taken to be the TCA9548A mux: each of its 8 channels is
-//   switched on in turn and scanned, then all channels are switched off.
 // The names printed beside addresses are what this project expects there; a scan
 //   can't tell which chip actually answered.
 #include <stdbool.h>
@@ -21,8 +19,6 @@
 #define SCAN_PERIOD_MS  5000
 #define ADDR_FIRST      0x08
 #define ADDR_LAST       0x77
-#define MUX_ADDR        0x70
-#define MUX_CHANNELS    8
 
 typedef struct {
     int port;
@@ -44,7 +40,6 @@ static const char *expected_at(uint8_t addr)
     case 0x48: return "ADS1115";
     case 0x57: return "memory chip on the DS3231 board";
     case 0x68: return "DS3231";
-    case 0x70: return "TCA9548A mux";
     case 0x76: return "BMP388 with SDO low";
     case 0x77: return "BMP388 with SDO high";
     default:   return "not expected in this project";
@@ -72,58 +67,19 @@ static bool lines_idle_high(const bus_pins_t *b)
     return level[0] && level[1];
 }
 
-// Probes every address and prints the ones that answer. skip is left out
-// (the mux itself, while one of its channels is being scanned); 0 for none.
+// Probes every address and prints the ones that answer.
 // Returns how many answered.
-static int scan_addresses(i2c_master_bus_handle_t bus, const char *indent, uint8_t skip)
+static int scan_addresses(i2c_master_bus_handle_t bus)
 {
     int found = 0;
 
     for (uint8_t addr = ADDR_FIRST; addr <= ADDR_LAST; addr++) {
-        if (addr == skip) {
-            continue;
-        }
         if (i2c_master_probe(bus, addr, PROBE_TIMEOUT_MS) == ESP_OK) {
-            printf("%s0x%02x  %s\n", indent, addr, expected_at(addr));
+            printf("  0x%02x  %s\n", addr, expected_at(addr));
             found++;
         }
     }
     return found;
-}
-
-// channels is the mux control byte: one bit per channel, 0 for all off.
-static esp_err_t mux_select(i2c_master_dev_handle_t mux, uint8_t channels)
-{
-    return i2c_master_transmit(mux, &channels, 1, PROBE_TIMEOUT_MS);
-}
-
-static void scan_mux(i2c_master_bus_handle_t bus)
-{
-    i2c_device_config_t cfg = {
-        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-        .device_address = MUX_ADDR,
-        .scl_speed_hz = SCL_HZ,
-    };
-    i2c_master_dev_handle_t mux;
-
-    if (i2c_master_bus_add_device(bus, &cfg, &mux) != ESP_OK) {
-        printf("  mux: could not open 0x%02x\n", MUX_ADDR);
-        return;
-    }
-    for (int ch = 0; ch < MUX_CHANNELS; ch++) {
-        if (mux_select(mux, 1u << ch) != ESP_OK) {
-            printf("  mux channel %d: select FAILED\n", ch);
-            continue;
-        }
-        printf("  mux channel %d:\n", ch);
-        if (scan_addresses(bus, "    ", MUX_ADDR) == 0) {
-            printf("    nothing\n");
-        }
-    }
-    if (mux_select(mux, 0) != ESP_OK) {
-        printf("  mux: switching all channels off FAILED\n");
-    }
-    i2c_master_bus_rm_device(mux);
 }
 
 static void scan_bus(const bus_pins_t *b)
@@ -149,11 +105,8 @@ static void scan_bus(const bus_pins_t *b)
         return;
     }
 
-    int found = scan_addresses(bus, "  ", 0);
+    int found = scan_addresses(bus);
     printf("  %d device%s answered\n", found, found == 1 ? "" : "s");
-    if (i2c_master_probe(bus, MUX_ADDR, PROBE_TIMEOUT_MS) == ESP_OK) {
-        scan_mux(bus);
-    }
     i2c_del_master_bus(bus);
 }
 

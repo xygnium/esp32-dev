@@ -106,13 +106,31 @@ Input assignment (proposed; `ads1115-dev` doesn't number the inputs):
 
 ## Open items
 
-- **Where the ADS1115 and divider sit.** `ads1115-dev/DESIGN.md` wants them away from the thermistor (cooler and more stable), with only the thermistor on its own CAT5 pair. This design puts them at the far end of the cable with the SHT45. Undecided.
+- **Where the ADS1115 and divider sit.** Chosen: the ADS1115 and divider go in their own vented box, away from the SHT45 (`ads1115-dev/DESIGN.md` also wants them away from the thermistor). One CAT5 runs ESP32 box to SHT45, then on to the ADS1115 box, each leg 6 to 12 in. Still to settle: whether the SHT45 is a tap on one continuous cable or a cable ends there and a second starts, and where the thermistor sits (its own pair from the ADS1115 box).
 - **ADS1115 input assignment.** A0 as the excitation monitor and A1 as the thermistor tap is proposed, not confirmed.
 - **CAT5 conductor pairing.** The table above is proposed, not confirmed.
 - **Header pin mapping.** Pins 1 to 5 as 3.3 V, GND, SDA, SCL, energize is assumed, not confirmed.
 - **Input filter.** Check whether the ADS1115 board has its own series resistors or capacitors on A0 to A3.
-- **Cable length.** A long run adds capacitance to the I2C lines, and the 100 kHz clock may need lowering.
 - **Firmware for GPIO25.** No code drives the energize lead yet.
+
+## Design notes (for later consideration)
+
+Figures are estimates from typical datasheet values and general reasoning, not measurements.
+
+- **Heat sources near the SHT45:**
+  - The breakout's power LED (a few mW) is probably the biggest steady source. Test by comparing readings with it lit and disconnected.
+  - The ADS1115 (about 0.5 mW converting) and the divider (about 0.5 mW, pulsed) are small.
+  - The SHT45's own dissipation is negligible.
+- **Resolution limits:** the SHT45 resolves about 0.01 °C, and the calibrated thermistor chain is budgeted at ±0.05 to 0.1 °C. Effects of thousandths of a degree can be ignored. Only sources of about 0.05 °C or more at the sensor matter.
+- **Placement:** the SHT45 and the thermistor sit side by side at the same height, close together, so they see the same air. The ADS1115 box sits above or beside them, with its vent at the top so warm air leaves upward. Nothing is in direct sun.
+- **Vented box:** venting helps the resistor's stability more than it helps the SHT45. Keep the box out of rain and damp.
+- **Cable run:** ESP32 box to SHT45 to ADS1115 box, each leg 6 to 12 in, so cable capacitance and the stub at the SHT45 are not concerns.
+- **SHT45 heater (outdoor use):**
+  - It clears condensation that leaves humidity stuck near 100%. It stays off unless firmware sends the heater command, and none does yet.
+  - Pulses are 0.1 s or 1 s at 20, 110 or 200 mW. The SHT45's specifications don't hold during a pulse, so discard its readings until it has cooled.
+  - A pulse may also warm the thermistor beside it, so discard its readings for the same period.
+  - The datasheet caps heater-on time at 10% of the sensor's lifetime. A 1 s pulse once a minute is about 1.7%. Firmware should count heater time.
+  - The datasheet gives no operating life that I found. Check its drift figures if it matters.
 
 ## Reading the output
 

@@ -118,7 +118,7 @@ Input assignment (proposed; `ads1115-dev` doesn't number the inputs):
 Figures are estimates from typical datasheet values and general reasoning, not measurements.
 
 - **Heat sources near the SHT45:**
-  - The breakout's power LED (a few mW) is probably the biggest steady source. Test by comparing readings with it lit and disconnected.
+  - The SHT45's breakout power LED (a few mW) was probably the biggest steady source. It has been removed from the Adafruit 6174 (SHT45 with PTFE) by cutting it with a knife. Other SHT45 boards, and the ADS1115 board, still have theirs unless stated. Whether the Adafruit board has an LED is unconfirmed in Adafruit's documentation, so the removal was done on the board itself.
   - The ADS1115 (about 0.5 mW converting) and the divider (about 0.5 mW, pulsed) are small.
   - The SHT45's own dissipation is negligible.
 - **Resolution limits:** the SHT45 resolves about 0.01 °C, and the calibrated thermistor chain is budgeted at ±0.05 to 0.1 °C. Effects of thousandths of a degree can be ignored. Only sources of about 0.05 °C or more at the sensor matter.

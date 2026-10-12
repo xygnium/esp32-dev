@@ -1,0 +1,120 @@
+# i2c-scan wiring
+
+Scans I2C bus 0 and bus 1, reports a line held low at idle, and identifies the BMP388 (chip id) and SHT4x (serial number). The ambient project shares this board and wiring.
+
+## ESP32 pins (from `main/main.c`)
+
+| Bus | SDA | SCL |
+|---|---|---|
+| 0 | GPIO21 (D21) | GPIO22 (D22) |
+| 1 | GPIO32 (D32) | GPIO33 (D33) |
+
+The scan runs at 100 kHz with the ESP32's internal pull-ups enabled.
+
+## Power
+
+| Mode | Source |
+|---|---|
+| Development | USB |
+| Production | Barrel jack |
+
+A 5 V bus on the board joins three things:
+
+- the ESP32's VIN pin;
+- the barrel jack's 5 V;
+- the 3.3 V regulator's input.
+
+On USB, the ESP32 board's USB 5 V reaches the bus through the VIN pin. In production, the jack feeds the bus and so the ESP32's VIN. The regulator therefore runs in both modes, and the 3.3 V rail for the I2C devices comes up and goes down with the ESP32.
+
+The regulator's output connects to a 3.3 V bus. The 3.3 V bus feeds the DS3231, the BMP388 and header pin 1. It is not connected to the ESP32's 3V3 pin.
+
+Use one source at a time. The user is responsible for never connecting USB and the barrel jack together.
+
+## On the board with the ESP32
+
+The DS3231 and BMP388 are mounted on the same board as the ESP32, on bus 0:
+
+| Device | Address | Bus 0 pins |
+|---|---|---|
+| DS3231 | 0x68 (its memory chip answers at 0x57) | SDA to D21, SCL to D22 |
+| BMP388 | 0x76 (SDO low) or 0x77 (SDO high) | SDA to D21, SCL to D22 |
+
+Both are powered from 3.3 V, like every I2C device in this setup. That 3.3 V comes from a separate regulator, not the ESP32's 3V3 pin, and the regulator's ground is common with the ESP32's. The BMP388 address depends on how its SDO pin is tied, so check which one the scan reports.
+
+## Headers
+
+Two headers extend bus 0 off the board and add the thermistor energize lead. The pins are labelled 1 to 5 across both headers:
+
+2-pin header (power):
+
+| Pin | Signal |
+|---|---|
+| 1 | 3.3 V (from the separate regulator) |
+| 2 | GND |
+
+3-pin header (signals):
+
+| Pin | Signal | Goes to |
+|---|---|---|
+| 3 | SDA | D21 |
+| 4 | SCL | D22 |
+| 5 | Thermistor energize | GPIO25 (D25) |
+
+A CAT5 cable connects to the headers. Its far end carries:
+
+- an **SHT45** (0x44) on SDA/SCL, powered from 3.3 V and GND;
+- an **ADS1115** (0x48) on SDA/SCL, powered from 3.3 V and GND;
+- the **thermistor voltage divider**, which the ADS1115 reads. The energize lead from the ESP32 powers the divider only while a reading is taken.
+
+All of these share bus 0 with the DS3231 and BMP388, so the addresses on the bus are 0x44, 0x48, 0x57, 0x68 and 0x76 or 0x77, with no conflicts. The scan should list all of them, and the SHT45 and ADS1115 go missing if the cable is faulty.
+
+CAT5 has 8 conductors in 4 twisted pairs, and the two headers carry 5 signals. Proposed assignment (for review), with each signal twisted with a ground so SDA, SCL and the energize lead are each shielded from the others:
+
+| Pair (colors) | Solid-color wire | White-striped wire |
+|---|---|---|
+| Orange | SDA | GND |
+| Green | SCL | GND |
+| Blue | Thermistor energize | GND |
+| Brown | 3.3 V | GND |
+
+All four GND wires join at header pin 2 and at the far end's ground.
+
+Bus 1 (D32/D33) is not on the headers.
+
+GPIO25 was chosen because it is output-capable, is not a boot-strapping or flash pin, and no project in this repo uses it. Pins already taken in the code: 21 and 22 (bus 0), 32 and 33 (bus 1), 34 (supply voltage sense, ambient).
+
+## ADS1115 inputs
+
+From `ads1115-dev/DESIGN.md`:
+
+- Ratiometric reading with pulsed excitation: the energize lead (GPIO25) drives the divider only while a conversion runs.
+- The divider is: fixed resistor (10k, 0.1%, ≤15 ppm/°C), then the tap, then the thermistor, then a single-point ground.
+- One input measures the excitation voltage. Each thermistor input reads its divider tap and is computed as a ratio against the excitation input. Up to 3 thermistors plus the excitation monitor per chip.
+- Inputs are single-ended (against GND), with the same gain setting on every input.
+- Each used input gets a 1 kΩ series resistor and a 100 nF capacitor to ground at the pin. `DESIGN.md` assumes the board has none; check yours.
+- ADDR is pulled low on the board, which gives 0x48.
+
+Input assignment (proposed; `ads1115-dev` doesn't number the inputs):
+
+| Input | Connects to |
+|---|---|
+| A0 | Excitation monitor: the energize lead, through 1 kΩ with 100 nF to GND |
+| A1 | Divider tap for the thermistor, through 1 kΩ with 100 nF to GND |
+| A2, A3 | Spare, for more thermistors |
+
+`DESIGN.md` suggests the ADS1115 and resistors sit away from the thermistor, with only the thermistor on its own CAT5 pair. This design puts the ADS1115 and divider at the far end of the cable with the SHT45, so the thermistor wires connect directly to the divider.
+
+## Open items
+
+- **Where the ADS1115 and divider sit.** `ads1115-dev/DESIGN.md` wants them away from the thermistor (cooler and more stable), with only the thermistor on its own CAT5 pair. This design puts them at the far end of the cable with the SHT45. Undecided.
+- **ADS1115 input assignment.** A0 as the excitation monitor and A1 as the thermistor tap is proposed, not confirmed.
+- **CAT5 conductor pairing.** The table above is proposed, not confirmed.
+- **Header pin mapping.** Pins 1 to 5 as 3.3 V, GND, SDA, SCL, energize is assumed, not confirmed.
+- **Input filter.** Check whether the ADS1115 board has its own series resistors or capacitors on A0 to A3.
+- **Cable length.** A long run adds capacitance to the I2C lines, and the 100 kHz clock may need lowering.
+- **Firmware for GPIO25.** No code drives the energize lead yet.
+
+## Reading the output
+
+- `idle levels: SDA low` or `SCL low`: a short, a miswired pin, or a device holding the line. The scan skips that bus. Unplug devices one at a time to find the cause.
+- A BMP388 address that answers but isn't a BMP388 (register 0 isn't 0x50) prints "not a BMP388".

@@ -2,6 +2,13 @@
 
 Scans I2C bus 0 and bus 1, reports a line held low at idle, and identifies the BMP388 (chip id) and SHT4x (serial number). The ambient project shares this board and wiring.
 
+## ESP32 boards
+
+| Board | Used for |
+|---|---|
+| 1 dot | Breadboard rig |
+| 2 dots | Perfboard (the wiring in this document) |
+
 ## ESP32 pins (from `main/main.c`)
 
 | Bus | SDA | SCL |
@@ -26,7 +33,7 @@ A 5 V bus on the board joins three things:
 
 On USB, the ESP32 board's USB 5 V reaches the bus through the VIN pin. In production, the jack feeds the bus and so the ESP32's VIN. The regulator therefore runs in both modes, and the 3.3 V rail for the I2C devices comes up and goes down with the ESP32.
 
-The regulator's output connects to a 3.3 V bus. The 3.3 V bus feeds the DS3231, the BMP388 and header pin 1. It is not connected to the ESP32's 3V3 pin.
+The regulator's output connects to a 3.3 V bus. The 3.3 V bus feeds the DS3231, the BMP388 and the 2-pin header's 1-dot pin. It is not connected to the ESP32's 3V3 pin.
 
 Use one source at a time. The user is responsible for never connecting USB and the barrel jack together.
 
@@ -43,22 +50,32 @@ Both are powered from 3.3 V, like every I2C device in this setup. That 3.3 V com
 
 ## Headers
 
-Two headers extend bus 0 off the board and add the thermistor energize lead. The pins are labelled 1 to 5 across both headers:
+Two headers extend bus 0 off the board and add the thermistor energize lead. Both headers are marked with dots, counted from 1 on each header:
 
 2-pin header (power):
 
 | Pin | Signal |
 |---|---|
-| 1 | 3.3 V (from the separate regulator) |
-| 2 | GND |
+| 1 dot | 3.3 V (from the separate regulator) |
+| 2 dots | GND |
 
 3-pin header (signals):
 
 | Pin | Signal | Goes to |
 |---|---|---|
-| 3 | SDA | D21 |
-| 4 | SCL | D22 |
-| 5 | Thermistor energize | GPIO25 (D25) |
+| 1 dot | SDA | D21 |
+| 2 dots | SCL | D22 |
+| 3 dots | Thermistor energize | GPIO25 (D25) |
+
+Wire colors on the warm box board (the board's own wires, not the CAT5 conductors):
+
+| Signal | Color |
+|---|---|
+| SDA | orange |
+| SCL | brown |
+| 3.3 V | green |
+| GND | black |
+| Thermistor energize | blue |
 
 A CAT5 cable connects to the headers. Its far end carries:
 
@@ -68,16 +85,16 @@ A CAT5 cable connects to the headers. Its far end carries:
 
 All of these share bus 0 with the DS3231 and BMP388, so the addresses on the bus are 0x44, 0x48, 0x57, 0x68 and 0x76 or 0x77, with no conflicts. The scan should list all of them, and the SHT45 and ADS1115 go missing if the cable is faulty.
 
-CAT5 has 8 conductors in 4 twisted pairs, and the two headers carry 5 signals. Proposed assignment (for review), with each signal twisted with a ground so SDA, SCL and the energize lead are each shielded from the others:
+CAT5 has 8 conductors in 4 twisted pairs, and the two headers carry 5 signals. Proposed assignment (for review), matching the board wires (SCL brown, SDA orange), with each signal twisted with a ground so SDA, SCL and the energize lead are each shielded from the others:
 
 | Pair (colors) | Solid-color wire | White-striped wire |
 |---|---|---|
+| Brown | SCL | GND |
 | Orange | SDA | GND |
-| Green | SCL | GND |
+| Green | 3.3 V | GND |
 | Blue | Thermistor energize | GND |
-| Brown | 3.3 V | GND |
 
-All four GND wires join at header pin 2 and at the far end's ground.
+All four GND wires join at the 2-pin header's 2-dot pin and at the far end's ground.
 
 Bus 1 (D32/D33) is not on the headers.
 

@@ -179,6 +179,26 @@ Figures are estimates from typical datasheet values and general reasoning, not m
   - The datasheet caps heater-on time at 10% of the sensor's lifetime. A 1 s pulse once a minute is about 1.7%. Firmware should count heater time.
   - The datasheet gives no operating life that I found. Check its drift figures if it matters.
 
+## SD card (microSD board, SPI mode)
+
+Wired and verified with `sd-probe` (a 120 MB SDSC card mounted, wrote, read back and deleted a file at 4 MHz; PASS). The pins are the ESP32's standard VSPI pins, with CS moved off GPIO5 because GPIO5 is a boot-strapping pin.
+
+The board has pull-ups on its lines and no 5 V to 3.3 V regulator. It runs from the 3.3 V bus only; never connect it to 5 V.
+
+| Board pin | Function | Goes to | Wire color |
+|---|---|---|---|
+| 3V3 | power | 3.3 V bus | green |
+| GND | ground | GND | black |
+| CLK | SCK | ESP32 D18 (GPIO18) | blue |
+| MISO | MISO | ESP32 D19 (GPIO19) | orange |
+| MOSI | MOSI | ESP32 D23 (GPIO23) | purple |
+| CS | CS | ESP32 D4 (GPIO4) | yellow |
+
+- The board already works on a Pico, so it needs no added pull-ups or capacitors. It has six small parts: four marked 103 (10 kΩ, probably pull-ups) and two brown capacitors of unknown value.
+- The same regulator and SD board run together in two other projects on a Pico, with no problems so far, so build it and see.
+- Wire colors were assigned in the order the board's pins were listed (CS, MOSI, CLK, MISO). Blue is also the thermistor energize color and orange is also SDA on the warm box board. The reuse is accepted because there are no more colors; 30 AWG wire is too thin for tape marks, so rely on visual inspection and this wiring table, and check continuity before powering up.
+- If the card fails to initialise, check the supply first, then the wiring against the table.
+
 ## Reading the output
 
 - `idle levels: SDA low` or `SCL low`: a short, a miswired pin, or a device holding the line. The scan skips that bus. Unplug devices one at a time to find the cause.

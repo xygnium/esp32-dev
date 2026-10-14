@@ -59,6 +59,8 @@ BMP388 board pins, in I2C mode:
 | INT | not connected | |
 | 3V0 | not connected | |
 
+The DS3231 board's charging resistor has been removed, so a non-rechargeable backup battery (such as a CR2032) can be fitted safely.
+
 Both are powered from 3.3 V, like every I2C device in this setup. That 3.3 V comes from a separate regulator, not the ESP32's 3V3 pin, and the regulator's ground is common with the ESP32's.
 
 ## Headers

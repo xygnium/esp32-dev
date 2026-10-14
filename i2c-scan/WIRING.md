@@ -44,9 +44,22 @@ The DS3231 and BMP388 are mounted on the same board as the ESP32, on bus 0:
 | Device | Address | Bus 0 pins |
 |---|---|---|
 | DS3231 | 0x68 (its memory chip answers at 0x57) | SDA to D21, SCL to D22 |
-| BMP388 | 0x76 (SDO low) or 0x77 (SDO high) | SDA to D21, SCL to D22 |
+| BMP388 | 0x76 (SDO tied to GND) | SDA to D21, SCL to D22 |
 
-Both are powered from 3.3 V, like every I2C device in this setup. That 3.3 V comes from a separate regulator, not the ESP32's 3V3 pin, and the regulator's ground is common with the ESP32's. The BMP388 address depends on how its SDO pin is tied, so check which one the scan reports.
+BMP388 board pins, in I2C mode:
+
+| Board pin | Goes to | Wire color |
+|---|---|---|
+| VIN | 3.3 V bus | green |
+| GND | GND | black |
+| SCK | SCL (D22) | brown |
+| SDI | SDA (D21) | orange |
+| SDO | GND (address 0x76) | black |
+| CS | 3.3 V bus (forces I2C mode; the board has no pull-up of its own) | green |
+| INT | not connected | |
+| 3V0 | not connected | |
+
+Both are powered from 3.3 V, like every I2C device in this setup. That 3.3 V comes from a separate regulator, not the ESP32's 3V3 pin, and the regulator's ground is common with the ESP32's.
 
 ## Headers
 
@@ -83,7 +96,7 @@ A CAT5 cable connects to the headers. Its far end carries:
 - an **ADS1115** (0x48) on SDA/SCL, powered from 3.3 V and GND;
 - the **thermistor voltage divider**, which the ADS1115 reads. The energize lead from the ESP32 powers the divider only while a reading is taken.
 
-All of these share bus 0 with the DS3231 and BMP388, so the addresses on the bus are 0x44, 0x48, 0x57, 0x68 and 0x76 or 0x77, with no conflicts. The scan should list all of them, and the SHT45 and ADS1115 go missing if the cable is faulty.
+All of these share bus 0 with the DS3231 and BMP388, so the addresses on the bus are 0x44, 0x48, 0x57, 0x68 and 0x76, with no conflicts. The scan should list all of them, and the SHT45 and ADS1115 go missing if the cable is faulty.
 
 CAT5 has 8 conductors in 4 twisted pairs, and the two headers carry 5 signals. Proposed assignment (for review), matching the board wires (SCL brown, SDA orange), with each signal twisted with a ground so SDA, SCL and the energize lead are each shielded from the others:
 
@@ -142,6 +155,23 @@ Figures are estimates from typical datasheet values and general reasoning, not m
 - **Placement:** the SHT45 and the thermistor sit side by side at the same height, close together, so they see the same air. The ADS1115 box sits above or beside them, with its vent at the top so warm air leaves upward. Nothing is in direct sun.
 - **Vented box:** venting helps the resistor's stability more than it helps the SHT45. Keep the box out of rain and damp.
 - **Cable run:** ESP32 box to SHT45 to ADS1115 box, each leg 6 to 12 in, so cable capacitance and the stub at the SHT45 are not concerns.
+- **Far-end connections (planned):** the SHT45 and ADS1115 breakouts plug into female pcb headers soldered to perfboards, with the CAT5 conductors soldered to the perfboard traces.
+  - The SHT45 is mid-chain: the incoming and outgoing CAT5 conductors go to the same traces, with the SHT45's socket on them, so signals pass through with no tap.
+  - The ADS1115 perfboard also holds the 10k divider resistor, the 1 kΩ and 100 nF input filters, and the thermistor pair's pads or header.
+  - The breakouts' pin orders differ, so wire each socket to its own board's pin names.
+  - Sockets are unkeyed. Mark pin 1 on the perfboard and on the breakout, and check polarity with a meter before the first power-up, since a reversed SHT45 puts 3.3 V on ground.
+  - The breakout stands about 8 mm above the perfboard. Put the SHT45 at the perfboard's free edge with its sensor end pointing away from the perfboard and the ADS1115 socket.
+  - Add strain relief on the cable and secure the breakouts against loosening, for example with a dab of hot glue.
+  - Each breakout adds its own pull-ups to the bus. Check the idle levels on the scan after each addition.
+  - Contact protection: see the note below. Both far-end boxes are vented, so their contacts see outdoor humidity.
+- **Contact protection for header pins (general guidance, untested here):**
+  - Low-voltage signals can fail through a film of oxide on the contact, so corrosion in damp air is the risk, not current.
+  - Avoid thick insulating grease (silicone dielectric grease) on unsealed header pins. A plug-in contact wipes little, so a thick film can make the contact intermittent.
+  - If protection is wanted, use a thin film of contact enhancer made for electronics (DeoxIT-type), or conformal coating after assembly, with the sockets and mating pins masked.
+  - Never use conductive paste: it can bridge adjacent 2.54 mm pins.
+  - The SHT45 needs outside air, so its box can't be sealed, and its socket sees humidity and possible condensation. Soldering the SHT45 to the perfboard (or to short wires) instead of using a socket avoids the contact problem, at the cost of easy swapping.
+  - Never coat the SHT45's sensor opening or its PTFE membrane, since coating blocks the air and ruins the readings. Coat only the perfboard and the pins, and mask the sensor.
+  - The ADS1115 box is vented too, but its contacts see less direct air, so a socket there is less of a worry.
 - **SHT45 heater (outdoor use):**
   - It clears condensation that leaves humidity stuck near 100%. It stays off unless firmware sends the heater command, and none does yet.
   - Pulses are 0.1 s or 1 s at 20, 110 or 200 mW. The SHT45's specifications don't hold during a pulse, so discard its readings until it has cooled.

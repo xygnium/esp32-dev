@@ -69,10 +69,10 @@ Two headers extend bus 0 off the board and add the thermistor energize lead. Bot
 
 2-pin header (power):
 
-| Pin | Signal |
-|---|---|
-| 1 dot | 3.3 V (from the separate regulator) |
-| 2 dots | GND |
+| Pin | Signal | Connection |
+|---|---|---|
+| 1 dot | 3.3 V (from the separate regulator) | sits directly on the 3.3 V rail, no wire |
+| 2 dots | GND | sits directly on the GND rail, no wire |
 
 3-pin header (signals):
 
@@ -90,17 +90,13 @@ Wire colors on the warm box board (the board's own wires, not the CAT5 conductor
 | SCL | brown |
 | 3.3 V | green |
 | GND | black |
-| Thermistor energize | blue |
+| Thermistor energize | yellow |
 
-A CAT5 cable connects to the headers. Its far end carries:
+CAT5 #1 connects the headers to the ADS1115 box (see the layout plan below).
 
-- an **SHT45** (0x44) on SDA/SCL, powered from 3.3 V and GND;
-- an **ADS1115** (0x48) on SDA/SCL, powered from 3.3 V and GND;
-- the **thermistor voltage divider**, which the ADS1115 reads. The energize lead from the ESP32 powers the divider only while a reading is taken.
+The SHT45 and ADS1115 share bus 0 with the DS3231 and BMP388, so the addresses on the bus are 0x44, 0x48, 0x57, 0x68 and 0x76, with no conflicts. The scan should list all of them, and the SHT45 and ADS1115 go missing if the cable is faulty.
 
-All of these share bus 0 with the DS3231 and BMP388, so the addresses on the bus are 0x44, 0x48, 0x57, 0x68 and 0x76, with no conflicts. The scan should list all of them, and the SHT45 and ADS1115 go missing if the cable is faulty.
-
-CAT5 has 8 conductors in 4 twisted pairs, and the two headers carry 5 signals. Proposed assignment (for review), matching the board wires (SCL brown, SDA orange), with each signal twisted with a ground so SDA, SCL and the energize lead are each shielded from the others:
+CAT5 #1 pairing. CAT5 has 8 conductors in 4 twisted pairs, and the two headers carry 5 signals. Proposed assignment (for review), matching the board wires (SCL brown, SDA orange), with each signal twisted with a ground so SDA, SCL and the energize lead are each shielded from the others:
 
 | Pair (colors) | Solid-color wire | White-striped wire |
 |---|---|---|
@@ -109,11 +105,52 @@ CAT5 has 8 conductors in 4 twisted pairs, and the two headers carry 5 signals. P
 | Green | 3.3 V | GND |
 | Blue | Thermistor energize | GND |
 
-All four GND wires join at the 2-pin header's 2-dot pin and at the far end's ground.
+All four GND wires join at the 2-pin header's 2-dot pin and at the ADS1115 box's ground.
 
 Bus 1 (D32/D33) is not on the headers.
 
 GPIO25 was chosen because it is output-capable, is not a boot-strapping or flash pin, and no project in this repo uses it. Pins already taken in the code: 21 and 22 (bus 0), 32 and 33 (bus 1), 34 (supply voltage sense, ambient).
+
+## Layout plan (for review)
+
+The apparatus sits under an open-air shed roof and measures the ambient air outside it, not the shed's air. Nothing is ever in direct sun.
+
+```
+[ESP32 box] --CAT5 #1, 6-12 in-- [ADS1115 box] --CAT5 #2, about 3 ft-- [SHT45 + thermistor]
+ warm box                         vented, beside                         lowest, shaded,
+ (above or level                  the warm box                           free airflow, no
+  with the sensors)                                                      electronics
+```
+
+- **Warm box (the perfboard):** ESP32, DS3231, BMP388, SD card and the 3.3 V regulator. It is the largest heat source, roughly half a watt with WiFi.
+- **ADS1115 box:** its own vented box, beside the warm box. It holds the ADS1115, the divider resistor (10k), the 1 kΩ and 100 nF input filters, and the thermistor's connection. It also taps the I2C bus and carries it to CAT5 #2. Vent at the top, covered with a fine screen against insects.
+- **Sensor end:** the SHT45 and the thermistor sit side by side at the same height, close together, so they see the same air. They are the lowest of the three parts, about 3 ft from the warm box, well below the roof, and away from walls and the ground. No electronics are there.
+- **Warm air rises,** so both boxes go above or level with the sensors, never below them.
+
+**CAT5 #1** (warm box to ADS1115 box): the five signals listed under Headers, with the pairing above.
+
+**CAT5 #2** (ADS1115 box to sensors): 3.3 V, GND, SDA and SCL for the SHT45, and the thermistor's two wires. Pairing (proposed):
+
+| Pair (colors) | Solid-color wire | White-striped wire |
+|---|---|---|
+| Brown | SCL | GND |
+| Orange | SDA | GND |
+| Green | 3.3 V | GND |
+| Blue | Thermistor divider tap | Thermistor ground return |
+
+- At the sensor end the thermistor's ground return is not joined to the SHT45's ground. The two grounds meet at the ADS1115 box, at its single ground point, as `DESIGN.md` asks.
+- A 3 ft I2C leg adds about 150 pF at roughly 50 pF per metre, well under the 400 pF limit, so the 100 kHz clock stays.
+- The SHT45 sits at the end of the leg, so it is a short stub, with no pass-through needed.
+
+**Thermistor:** a glass-bead NTC (the glass is sealed). Its bare leads and solder joints stay dry in a cooking bag for steam calibration (a bag test in salt water at room temperature passed; oven bags are rated about 200 °C). Outdoors, moisture films on bare leads could leak, so they need a coating or a bag. This is not decided.
+
+**Why the ADS1115 box is separate:** a precaution, not a known problem. It keeps the 10k divider resistor (about 15 ppm/°C) out of the warm box's heat and the analog inputs away from WiFi and SD current bursts. The ADS1115 itself dissipates about 0.5 mW. Test with a fixed precision resistor in place of the thermistor, logged in the intended arrangement. If the spread is no wider than on the bench, the boxes can be merged.
+
+**Build order** (each step adds one unknown, and the scan checks it):
+1. CAT5 #1 and the ADS1115: expect 0x48.
+2. CAT5 #2 and the SHT45: expect 0x44 and a serial number.
+3. A fixed resistor in place of the thermistor: check the noise.
+4. The thermistor, bagged or coated.
 
 ## ADS1115 inputs
 
@@ -134,11 +171,13 @@ Input assignment (proposed; `ads1115-dev` doesn't number the inputs):
 | A1 | Divider tap for the thermistor, through 1 kΩ with 100 nF to GND |
 | A2, A3 | Spare, for more thermistors |
 
-`DESIGN.md` suggests the ADS1115 and resistors sit away from the thermistor, with only the thermistor on its own CAT5 pair. This design puts the ADS1115 and divider at the far end of the cable with the SHT45, so the thermistor wires connect directly to the divider.
+The ADS1115 and resistors sit in their own box, away from the SHT45, with only the thermistor on a pair of CAT5 #2, as `DESIGN.md` suggests.
 
 ## Open items
 
-- **Where the ADS1115 and divider sit.** Chosen: the ADS1115 and divider go in their own vented box, away from the SHT45 (`ads1115-dev/DESIGN.md` also wants them away from the thermistor). One CAT5 runs ESP32 box to SHT45, then on to the ADS1115 box, each leg 6 to 12 in. Still to settle: whether the SHT45 is a tap on one continuous cable or a cable ends there and a second starts, and where the thermistor sits (its own pair from the ADS1115 box).
+- **Layout plan.** Two CAT5 cables and a separate ADS1115 box, as under Layout plan. Waiting for review.
+- **Thermistor protection outdoors.** A bag or a coating for the bare leads and joints is not decided.
+- **Box and mounting details.** Box types, mounting heights and how the sensor end is held are not decided.
 - **ADS1115 input assignment.** A0 as the excitation monitor and A1 as the thermistor tap is proposed, not confirmed.
 - **CAT5 conductor pairing.** The table above is proposed, not confirmed.
 - **Header pin mapping.** Pins 1 to 5 as 3.3 V, GND, SDA, SCL, energize is assumed, not confirmed.
@@ -154,12 +193,12 @@ Figures are estimates from typical datasheet values and general reasoning, not m
   - The ADS1115 (about 0.5 mW converting) and the divider (about 0.5 mW, pulsed) are small.
   - The SHT45's own dissipation is negligible.
 - **Resolution limits:** the SHT45 resolves about 0.01 °C, and the calibrated thermistor chain is budgeted at ±0.05 to 0.1 °C. Effects of thousandths of a degree can be ignored. Only sources of about 0.05 °C or more at the sensor matter.
-- **Placement:** the SHT45 and the thermistor sit side by side at the same height, close together, so they see the same air. The ADS1115 box sits above or beside them, with its vent at the top so warm air leaves upward. Nothing is in direct sun.
+- **Placement:** see the layout plan.
 - **Vented box:** venting helps the resistor's stability more than it helps the SHT45. Keep the box out of rain and damp.
-- **Cable run:** ESP32 box to SHT45 to ADS1115 box, each leg 6 to 12 in, so cable capacitance and the stub at the SHT45 are not concerns.
+- **Cable run:** see the layout plan. Cable capacitance is not a concern at these lengths.
 - **Far-end connections (planned):** the SHT45 and ADS1115 breakouts plug into female pcb headers soldered to perfboards, with the CAT5 conductors soldered to the perfboard traces.
-  - The SHT45 is mid-chain: the incoming and outgoing CAT5 conductors go to the same traces, with the SHT45's socket on them, so signals pass through with no tap.
-  - The ADS1115 perfboard also holds the 10k divider resistor, the 1 kΩ and 100 nF input filters, and the thermistor pair's pads or header.
+  - The ADS1115 perfboard also holds the 10k divider resistor, the 1 kΩ and 100 nF input filters, and the thermistor pair's pads or header. It takes CAT5 #1 in and CAT5 #2 out on the same bus traces.
+  - The SHT45 is at the end of CAT5 #2, so no pass-through is needed.
   - The breakouts' pin orders differ, so wire each socket to its own board's pin names.
   - Sockets are unkeyed. Mark pin 1 on the perfboard and on the breakout, and check polarity with a meter before the first power-up, since a reversed SHT45 puts 3.3 V on ground.
   - The breakout stands about 8 mm above the perfboard. Put the SHT45 at the perfboard's free edge with its sensor end pointing away from the perfboard and the ADS1115 socket.
@@ -198,7 +237,7 @@ The board has pull-ups on its lines and no 5 V to 3.3 V regulator. It runs from 
 
 - The board already works on a Pico, so it needs no added pull-ups or capacitors. It has six small parts: four marked 103 (10 kΩ, probably pull-ups) and two brown capacitors of unknown value.
 - The same regulator and SD board run together in two other projects on a Pico, with no problems so far, so build it and see.
-- Wire colors were assigned in the order the board's pins were listed (CS, MOSI, CLK, MISO). Blue is also the thermistor energize color and orange is also SDA on the warm box board. The reuse is accepted because there are no more colors; 30 AWG wire is too thin for tape marks, so rely on visual inspection and this wiring table, and check continuity before powering up.
+- Wire colors were assigned in the order the board's pins were listed (CS, MOSI, CLK, MISO). Orange is also SDA and yellow is also the thermistor energize lead on the warm box board. The reuse is accepted because there are no more colors; 30 AWG wire is too thin for tape marks, so rely on visual inspection and this wiring table, and check continuity before powering up.
 - If the card fails to initialise, check the supply first, then the wiring against the table.
 
 ## Reading the output

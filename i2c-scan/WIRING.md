@@ -116,7 +116,7 @@ GPIO25 was chosen because it is output-capable, is not a boot-strapping or flash
 The apparatus sits under an open-air shed roof and measures the ambient air outside it, not the shed's air. Nothing is ever in direct sun.
 
 ```
-[ESP32 box] --CAT5 #1, 6-12 in-- [ADS1115 box] --CAT5 #2, about 3 ft-- [SHT45 + thermistor]
+[ESP32 box] --CAT5 #1, about 30 in-- [ADS1115 box] --CAT5 #2, about 6 ft-- [SHT45 + thermistor]
  warm box                         vented, beside                         lowest, shaded,
  (above or level                  the warm box                           free airflow, no
   with the sensors)                                                      electronics
@@ -129,6 +129,11 @@ The apparatus sits under an open-air shed roof and measures the ambient air outs
 
 **CAT5 #1** (warm box to ADS1115 box): the five signals listed under Headers, with the pairing above.
 
+- Length: about 30 in, cut a little long and trimmed later (an estimate, to be checked against the real boxes). The cable leaves the bottom of the warm box and enters the bottom of the ADS1115 box, and it is split in the middle with a connector raised to the level of the boxes. Each half is about 15 in: 4 in down, 4 in back up, 2-3 in sideways, and 4-6 in of slack inside the box.
+- Drip loop: each half makes a U, so water running down the cable drips off the low point and never reaches the connector or the hole. The loop should be at least 3-4 in deep, with its lowest point below the hole.
+- Connector: point the mating face down or sideways, never up. A latching or locking type is better outdoors. Seal the holes with a grommet or sealant around the cable, since the boxes are vented for air and not for water.
+- Electrical: about 40 pF of added capacitance, far below the 400 pF I2C limit, so the 100 kHz clock stays. The connector adds contacts on every line, so recheck the scan after it is in (0x48 should still appear and the idle levels stay high).
+
 **CAT5 #2** (ADS1115 box to sensors): 3.3 V, GND, SDA and SCL for the SHT45, and the thermistor's two wires. Pairing (proposed):
 
 | Pair (colors) | Solid-color wire | White-striped wire |
@@ -139,7 +144,10 @@ The apparatus sits under an open-air shed roof and measures the ambient air outs
 | Blue | Thermistor divider tap | Thermistor ground return |
 
 - At the sensor end the thermistor's ground return is not joined to the SHT45's ground. The two grounds meet at the ADS1115 box, at its single ground point, as `DESIGN.md` asks.
-- A 3 ft I2C leg adds about 150 pF at roughly 50 pF per metre, well under the 400 pF limit, so the 100 kHz clock stays.
+- Length: about 6 ft (an estimate, to be checked against the real layout). It leaves the bottom of the ADS1115 box and is split with a connector raised to box level, the same as CAT5 #1. That is about 16 in from the box to the connector (5 in of slack inside, a 4 in drip loop down and 4 in back up, 2-3 in sideways), then about 3 ft of run to the sensors plus 1-2 ft of drop (the sensors sit lower than the boxes), plus 6 in of slack and a drip loop at the sensor end. Trim after the first mock-up.
+- Connector and holes: as for CAT5 #1 (mating face down or sideways, grommeted holes, drip loops).
+- A 6 ft I2C leg adds about 90 pF at roughly 50 pF per metre. With CAT5 #1 (about 40 pF) the cables total about 130 pF before the boards' own capacitance, still well under the 400 pF limit, so the 100 kHz clock stays.
+- The thermistor pair is an analog signal on a longer run: keep it in its own twisted pair (as in the table), and keep the 1 kΩ and 100 nF filter at the ADS1115 end. Check the noise in build step 3.
 - The SHT45 sits at the end of the leg, so it is a short stub, with no pass-through needed.
 
 **Thermistor:** a glass-bead NTC (the glass is sealed). Its bare leads and solder joints stay dry in a cooking bag for steam calibration (a bag test in salt water at room temperature passed; oven bags are rated about 200 °C). Outdoors, moisture films on bare leads could leak, so they need a coating or a bag. This is not decided.

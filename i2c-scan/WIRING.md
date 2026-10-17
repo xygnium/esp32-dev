@@ -116,23 +116,25 @@ GPIO25 was chosen because it is output-capable, is not a boot-strapping or flash
 The apparatus sits under an open-air shed roof and measures the ambient air outside it, not the shed's air. Nothing is ever in direct sun.
 
 ```
-[ESP32 box] --CAT5 #1, about 30 in-- [ADS1115 box] --CAT5 #2, about 6 ft-- [SHT45 + thermistor]
- warm box                         vented, beside                         lowest, shaded,
- (above or level                  the warm box                           free airflow, no
-  with the sensors)                                                      electronics
+[ESP32 box] --CAT5 #1, about 2 ft-- [ADS1115 box] --CAT5 #2, about 6-7 ft-- [SHT45 + thermistor]
+ warm box                         vented, beside                         in a hood, lowest,
+ (above or level                  the warm box,                          shaded, free airflow,
+  with the sensors)               2 RJ45 jacks                           no electronics
 ```
 
 - **Warm box (the perfboard):** ESP32, DS3231, BMP388, SD card and the 3.3 V regulator. It is the largest heat source, roughly half a watt with WiFi.
-- **ADS1115 box:** its own vented box, beside the warm box. It holds the ADS1115, the divider resistor (10k), the 1 kΩ and 100 nF input filters, and the thermistor's connection. It also taps the I2C bus and carries it to CAT5 #2. Vent at the top, covered with a fine screen against insects.
-- **Sensor end:** the SHT45 and the thermistor sit side by side at the same height, close together, so they see the same air. They are the lowest of the three parts, about 3 ft from the warm box, well below the roof, and away from walls and the ground. No electronics are there.
+- **ADS1115 box:** its own vented box (a plastic switch box with a keystone cover plate, open face down), beside the warm box. The plate holds two RJ45 jacks facing down: jack 1 takes CAT5 #1 from the warm box and jack 2 carries CAT5 #2 to the sensors. It holds the ADS1115, the divider resistor (10k), the 1 kΩ and 100 nF input filters, and the thermistor's connection. It also taps the I2C bus and carries it to CAT5 #2. Vent at the top, covered with a fine screen against insects.
+- **Sensor end:** the SHT45 and the thermistor sit side by side at the same height, close together, so they see the same air. They are the lowest of the three parts, about 3 ft from the warm box, well below the roof, and away from walls and the ground. No electronics are there. They hang inside a hood (see Sensor hood below).
 - **Warm air rises,** so both boxes go above or level with the sensors, never below them.
 
 **CAT5 #1** (warm box to ADS1115 box): the five signals listed under Headers, with the pairing above.
 
-- Length: about 30 in, cut a little long and trimmed later (an estimate, to be checked against the real boxes). The cable leaves the bottom of the warm box and enters the bottom of the ADS1115 box, and it is split in the middle with a connector raised to the level of the boxes. Each half is about 15 in: 4 in down, 4 in back up, 2-3 in sideways, and 4-6 in of slack inside the box.
-- Drip loop: each half makes a U, so water running down the cable drips off the low point and never reaches the connector or the hole. The loop should be at least 3-4 in deep, with its lowest point below the hole.
-- Connector: point the mating face down or sideways, never up. A latching or locking type is better outdoors. Seal the holes with a grommet or sealant around the cable, since the boxes are vented for air and not for water.
-- Electrical: about 40 pF of added capacitance, far below the 400 pF I2C limit, so the 100 kHz clock stays. The connector adds contacts on every line, so recheck the scan after it is in (0x48 should still appear and the idle levels stay high).
+- Cable and ends: bulk solid-core CAT5 (the cable on hand), cut to length. Solid core is stiff and can fatigue and break if flexed repeatedly. That risk is accepted. Crimp RJ45 plugs rated for solid core (ordinary stranded-wire plugs grip solid wire poorly), then check all 8 conductors with a continuity tester or cable tester before connecting anything. Don't unplug and replug often.
+- Length: about 2 ft, cut a little long and trimmed (an estimate, to be checked against the real boxes). The cable leaves the bottom of the warm box and plugs into jack 1 on the bottom of the ADS1115 box. The drip loops need about 11-14 in for the U (4 in down, 4 in back up, 3-6 in sideways), plus the plug bends and the stiffness of solid core.
+- Drip loop: the cable makes a U, so water running down it drips off the low point and never reaches the jack or the hole. The loop should be at least 3-4 in deep, with its lowest point below the hole and a gentle radius.
+- Jacks and holes: jacks face down. Seal the cable holes with a grommet or sealant, since the boxes are vented for air and not for water. Label the jacks "NOT ETHERNET": they carry 3.3 V, and plugging them into a network port (especially a PoE one) can damage a part.
+- Electrical: about 20 pF of added capacitance, far below the 400 pF I2C limit, so the 100 kHz clock stays. Recheck the scan after the cable is in (0x48 should appear and the idle levels stay high).
+- How it ends at the warm box (jack on the box, or conductors to the headers) is not decided.
 
 **CAT5 #2** (ADS1115 box to sensors): 3.3 V, GND, SDA and SCL for the SHT45, and the thermistor's two wires. Pairing (proposed):
 
@@ -144,11 +146,20 @@ The apparatus sits under an open-air shed roof and measures the ambient air outs
 | Blue | Thermistor divider tap | Thermistor ground return |
 
 - At the sensor end the thermistor's ground return is not joined to the SHT45's ground. The two grounds meet at the ADS1115 box, at its single ground point, as `DESIGN.md` asks.
-- Length: about 6 ft (an estimate, to be checked against the real layout). It leaves the bottom of the ADS1115 box and is split with a connector raised to box level, the same as CAT5 #1. That is about 16 in from the box to the connector (5 in of slack inside, a 4 in drip loop down and 4 in back up, 2-3 in sideways), then about 3 ft of run to the sensors plus 1-2 ft of drop (the sensors sit lower than the boxes), plus 6 in of slack and a drip loop at the sensor end. Trim after the first mock-up.
-- Connector and holes: as for CAT5 #1 (mating face down or sideways, grommeted holes, drip loops).
-- A 6 ft I2C leg adds about 90 pF at roughly 50 pF per metre. With CAT5 #1 (about 40 pF) the cables total about 130 pF before the boards' own capacitance, still well under the 400 pF limit, so the 100 kHz clock stays.
+- Cable and ends: solid-core CAT5, crimped with a solid-rated RJ45 plug at the ADS1115 box end (jack 2). At the sensor end the conductors are soldered to a small perfboard that carries a 5-pin female header, and the SHT45 breakout plugs into the header. The thermistor's two wires are soldered to pads on the same perfboard. The flexing risk is accepted, as for CAT5 #1. Inside the hood, tie or glue the cable to the perfboard's mounting point and fix the perfboard rigidly (standoffs or a small plate), so the solder joints never flex.
+- Length: about 6-7 ft, cut long and trimmed (an estimate, to be checked against the real layout). The jack faces down. The run is a drip loop at the box (about 11-14 in), about 3 ft across, 1-2 ft of drop (the sensors sit lower than the boxes), and about 6 in of slack inside the hood. Cut long first, since plug trimming and soldering use some length.
+- Jacks and holes: as for CAT5 #1 (jack facing down, grommeted holes, drip loops).
+- A 6-7 ft I2C leg adds about 100 pF at roughly 50 pF per metre. With CAT5 #1 (about 20 pF) the cables total about 120 pF before the boards' own capacitance, still well under the 400 pF limit, so the 100 kHz clock stays.
 - The thermistor pair is an analog signal on a longer run: keep it in its own twisted pair (as in the table), and keep the 1 kΩ and 100 nF filter at the ADS1115 end. Check the noise in build step 3.
 - The SHT45 sits at the end of the leg, so it is a short stub, with no pass-through needed.
+
+**Sensor hood (proposed):** the SHT45 and thermistor hang in free air under a small hood that keeps off drips from above (condensation from the roof, droppings), splashes and blown mist. The shed roof stays dry in heavy rain, so a single cover is enough.
+- Candidates: a single inverted plastic bowl, about 20-25 cm across (the wider opening gives the best airflow), or a wide-mouth plastic jar (for example an ice cream or mayonnaise jar) hung mouth down. Glass is not used.
+- A jar has one opening, so drill 4-6 vent holes (about 6 mm) near the top, and cover them with fine screen if insects are a problem. Without them the air stagnates and the readings lag. Test the lag: run the SHT45 under the hood and a bare sensor beside it for a day and compare.
+- CAT5 #2 passes through a hole in the closed end of the hood and is sealed with silicone, and it carries the sensors. Many food containers are polypropylene, which adhesives grip poorly, so test the silicone on a scrap of the same plastic and roughen the plastic first. A separate hanger (an eye bolt or cord to the beam) means the cable never takes the load.
+- The cable enters from above, so water or condensation can run down the jacket into the hole: seal the entry and fit a collar or wraps of tape above it.
+- Mount the perfboard so the sensors sit in the lower part of the hood, side by side at the same height, with the SHT45 facing down or sideways, never up, a few cm above the rim and away from the walls. Remove paper labels and glue residue from the inside.
+- Insects may move into an open-bottom cavity. A fine mesh ring over the gap is the fix, but it slows the air, so try without it first.
 
 **Thermistor:** a glass-bead NTC (the glass is sealed). Its bare leads and solder joints stay dry in a cooking bag for steam calibration (a bag test in salt water at room temperature passed; oven bags are rated about 200 °C). Outdoors, moisture films on bare leads could leak, so they need a coating or a bag. This is not decided.
 
@@ -185,12 +196,30 @@ The ADS1115 and resistors sit in their own box, away from the SHT45, with only t
 
 - **Layout plan.** Two CAT5 cables and a separate ADS1115 box, as under Layout plan. Waiting for review.
 - **Thermistor protection outdoors.** A bag or a coating for the bare leads and joints is not decided.
-- **Box and mounting details.** Box types, mounting heights and how the sensor end is held are not decided.
+- **Box and mounting details.** The ADS1115 box is proposed as a plastic switch box with a keystone plate and two RJ45 jacks, open face down, with vent holes and screen. Mounting heights are not decided.
+- **Sensor hood.** Bowl or plastic jar, vent holes, silicone seal on the cable entry and the hanger are proposed, not built. Check the adhesion of silicone on the chosen plastic, and compare the readings against a bare sensor.
+- **CAT5 #1 at the warm box.** Whether it ends in a jack on the box or on the headers is not decided.
+- **Solid-core plugs.** Crimp solid-rated RJ45 plugs and test all 8 conductors. The flexing risk is accepted.
 - **ADS1115 input assignment.** A0 as the excitation monitor and A1 as the thermistor tap is proposed, not confirmed.
 - **CAT5 conductor pairing.** The table above is proposed, not confirmed.
 - **Header pin mapping.** Pins 1 to 5 as 3.3 V, GND, SDA, SCL, energize is assumed, not confirmed.
 - **Input filter.** Check whether the ADS1115 board has its own series resistors or capacitors on A0 to A3.
 - **Firmware for GPIO25.** No code drives the energize lead yet.
+
+## Conditions to monitor
+
+Concerns accepted for the prototype. Check these after the first weeks outdoors, and again after each season.
+
+- **Scan health.** Run the scan periodically. A missing 0x44 or 0x48, or an idle line that is no longer high, points at a cable, plug, jack or header contact.
+- **SHT45 header and jacks.** Look for green or white corrosion, and for intermittent readings. Contacts under the hood and in the vented box see humidity and possible condensation. Remedy: a thin film of contact enhancer, conformal coating with the sensor masked, or soldering the breakout straight to the perfboard.
+- **Solid-core cable and solder joints.** The wire can fatigue where wind sways the hood. Look for cracks at the plug ends and at the perfboard, or for readings that jump when the cable is touched. Remedy: more strain relief, or stranded cable at the sensor end.
+- **Silicone seal on the hood.** Check the adhesion around the cable entry, especially on polypropylene. Look for water tracks below the hole.
+- **Hood lag and trapped air.** Compare the readings against a bare sensor for a day, and again after any change to the hood. Humidity that stays high long after rain suggests too few vent holes.
+- **Condensation and drips.** Look for water on the membrane, the perfboard or the jacks. Remedy: a second bowl or a skirt, or a diversion collar above the cable entry.
+- **Insects and nests.** Check the hood's open bottom, the vent screens and the box. Remedy: a fine mesh ring, which slows the air a little.
+- **Thermistor protection.** After the first steam calibration, repeat the bag leak check. Outdoors, check the bag or coating for pinholes and the leads for moisture.
+- **Drift against a reference.** Compare the SHT45 and the thermistor with a reference occasionally. A slow offset can mean contamination of the membrane or the heater's effect.
+- **Fixed-resistor noise.** The result of build step 3 is the baseline. Compare later readings against it if the thermistor looks noisy.
 
 ## Design notes (for later consideration)
 
@@ -204,21 +233,21 @@ Figures are estimates from typical datasheet values and general reasoning, not m
 - **Placement:** see the layout plan.
 - **Vented box:** venting helps the resistor's stability more than it helps the SHT45. Keep the box out of rain and damp.
 - **Cable run:** see the layout plan. Cable capacitance is not a concern at these lengths.
-- **Far-end connections (planned):** the SHT45 and ADS1115 breakouts plug into female pcb headers soldered to perfboards, with the CAT5 conductors soldered to the perfboard traces.
-  - The ADS1115 perfboard also holds the 10k divider resistor, the 1 kΩ and 100 nF input filters, and the thermistor pair's pads or header. It takes CAT5 #1 in and CAT5 #2 out on the same bus traces.
+- **Far-end connections (planned):** the ADS1115 breakout plugs into female pcb headers soldered to a perfboard in the ADS1115 box, with the CAT5 conductors from the two jacks wired to the perfboard. At the sensor end, CAT5 #2 is soldered to a small perfboard with a 5-pin female header, and the SHT45 breakout plugs into it (see Sensor hood).
+  - The ADS1115 perfboard also holds the 10k divider resistor, the 1 kΩ and 100 nF input filters, and the thermistor pair's pads or header. It takes CAT5 #1 in and CAT5 #2 out on the same bus traces. Jack 1 and jack 2 are punched down (or wired) to the perfboard by color, using the pairing tables.
   - The SHT45 is at the end of CAT5 #2, so no pass-through is needed.
-  - The breakouts' pin orders differ, so wire each socket to its own board's pin names.
-  - Sockets are unkeyed. Mark pin 1 on the perfboard and on the breakout, and check polarity with a meter before the first power-up, since a reversed SHT45 puts 3.3 V on ground.
-  - The breakout stands about 8 mm above the perfboard. Put the SHT45 at the perfboard's free edge with its sensor end pointing away from the perfboard and the ADS1115 socket.
-  - Add strain relief on the cable and secure the breakouts against loosening, for example with a dab of hot glue.
+  - The ADS1115 socket is unkeyed. Mark pin 1 on the perfboard and on the breakout, and check polarity with a meter before the first power-up.
+  - The SHT45 perfboard has the 5-pin female header for the breakout and pads for the thermistor wires. The SHT45 ground and the thermistor ground return stay separate there, as the CAT5 #2 table says. Wire the header to the breakout's own pin names (VIN, GND, SCL, SDA, and the 3Vo pin left unconnected), and confirm the order against the board before soldering.
+  - The header is unkeyed. Mark pin 1 on the perfboard and on the breakout, and check polarity with a meter before the first power-up, since a reversed SHT45 puts 3.3 V on ground.
+  - Add strain relief on the cables and secure the breakouts against loosening, for example with a dab of hot glue.
   - Each breakout adds its own pull-ups to the bus. Check the idle levels on the scan after each addition.
-  - Contact protection: see the note below. Both far-end boxes are vented, so their contacts see outdoor humidity.
+  - Contact protection: see the note below. The ADS1115 box is vented, so its contacts see outdoor humidity.
 - **Contact protection for header pins (general guidance, untested here):**
   - Low-voltage signals can fail through a film of oxide on the contact, so corrosion in damp air is the risk, not current.
   - Avoid thick insulating grease (silicone dielectric grease) on unsealed header pins. A plug-in contact wipes little, so a thick film can make the contact intermittent.
   - If protection is wanted, use a thin film of contact enhancer made for electronics (DeoxIT-type), or conformal coating after assembly, with the sockets and mating pins masked.
   - Never use conductive paste: it can bridge adjacent 2.54 mm pins.
-  - The SHT45 needs outside air, so its box can't be sealed, and its socket sees humidity and possible condensation. Soldering the SHT45 to the perfboard (or to short wires) instead of using a socket avoids the contact problem, at the cost of easy swapping.
+  - The SHT45 needs outside air, so it can't be sealed, and its header sees humidity and possible condensation under the hood. A socket is the part that can fail from corrosion. Soldering the breakout straight to the perfboard would avoid that, at the cost of easy swapping.
   - Never coat the SHT45's sensor opening or its PTFE membrane, since coating blocks the air and ruins the readings. Coat only the perfboard and the pins, and mask the sensor.
   - The ADS1115 box is vented too, but its contacts see less direct air, so a socket there is less of a worry.
 - **SHT45 heater (outdoor use):**

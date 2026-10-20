@@ -93,7 +93,7 @@ void app_main(void)
         if (err == ESP_FAIL) {
             printf("  the card answered but has no FAT filesystem it can mount\n");
         } else {
-            printf("  no card answered: check the wires against WIRING.md, and that the card is seated\n");
+            printf("  no card answered: check the wires against ambient/WIRING.md, and that the card is seated\n");
         }
         spi_bus_free(host.slot);
         return;

@@ -161,7 +161,7 @@ The pin assignments in the CAT5 #1 and #2 tables below are confirmed.
 - **Cable:** bulk solid-core CAT5 (the cable on hand), cut to length. Solid core is stiff and can fatigue if flexed repeatedly. That risk is accepted.
 - **Plugs:** both cables have a plug only at the ADS1115 box end. Crimp RJ45 plugs rated for solid core, since ordinary stranded-wire plugs grip solid wire poorly. Test all 8 conductors with a continuity tester or cable tester before connecting anything. Don't unplug and replug often.
 - **Pairing:** each signal is twisted with a ground (or, for the thermistor, with its own return), so SDA, SCL and the analog lines are shielded from each other. The pair colors match the warm box wires (SCL brown, SDA orange, 3.3 V green).
-- **Pin order:** RJ45 pins follow T568B, which is how the jacks are marked: 1 orange-striped, 2 orange, 3 green-striped, 4 blue, 5 blue-striped, 6 green, 7 brown-striped, 8 brown. Use the same order at both ends of each cable. If a jack is marked T568A, the pin numbers change but the colors don't.
+- **Pin order:** deliberately not T568A/B, because these are not Ethernet cables. RJ45 pins 1-8 are green, green-striped, orange, orange-striped, brown, brown-striped, blue, blue-striped, so each signal wire sits next to its striped ground on adjacent pins (1-2 3.3 V, 3-4 SDA, 5-6 SCL, 7-8 thermistor). Use the same order at both ends of each cable and in both CAT5 #1 and #2. Keystone jacks carry T568A/B color labels: ignore them and wire by pin number.
 - **Jacks and holes:** jacks face down. Seal each cable hole with a grommet or sealant, since the boxes are vented for air, not water. Label the jacks "NOT ETHERNET": they carry 3.3 V, and plugging one into a network port (especially PoE) can damage a part.
 - **Drip loops:** where a cable leaves the bottom of a box, it hangs in a U at least 3-4 in deep, with its lowest point below the hole and a gentle radius, so water drips off before it reaches a jack or hole.
 - **Capacitance:** about 50 pF per metre. CAT5 #1 (about 20 pF) and #2 (about 100 pF) total about 120 pF before the boards' own, well under the 400 pF I2C limit, so the 100 kHz clock stays.
@@ -171,14 +171,14 @@ The pin assignments in the CAT5 #1 and #2 tables below are confirmed.
 
 | RJ45 pin | Wire | Signal | Warm box end (headers) | ADS1115 box end |
 |---|---|---|---|---|
-| 1 | orange-striped | GND | 2-pin header, 2 dots | ground point |
-| 2 | orange | SDA | 3-pin header, 1 dot | SDA trace |
-| 3 | green-striped | GND | 2-pin header, 2 dots | ground point |
-| 4 | blue | Thermistor energize | 3-pin header, 3 dots | energize node |
-| 5 | blue-striped | GND | 2-pin header, 2 dots | ground point |
-| 6 | green | 3.3 V | 2-pin header, 1 dot | 3.3 V trace |
-| 7 | brown-striped | GND | 2-pin header, 2 dots | ground point |
-| 8 | brown | SCL | 3-pin header, 2 dots | SCL trace |
+| 1 | green | 3.3 V | 2-pin header, 1 dot | 3.3 V wire: ADS1115 VDD, jack 2 pin 1 |
+| 2 | green-striped | GND | 2-pin header, 2 dots | ground point (with ADS1115 GND) |
+| 3 | orange | SDA | 3-pin header, 1 dot | SDA wire: ADS1115 SDA, jack 2 pin 3 |
+| 4 | orange-striped | GND | 2-pin header, 2 dots | ground point (with ADS1115 GND) |
+| 5 | brown | SCL | 3-pin header, 2 dots | SCL wire: ADS1115 SCL, jack 2 pin 5 |
+| 6 | brown-striped | GND | 2-pin header, 2 dots | ground point (with ADS1115 GND) |
+| 7 | blue | Thermistor energize | 3-pin header, 3 dots | energize node: 10k to the tap node, 1 kΩ to ADS1115 A0 |
+| 8 | blue-striped | GND | 2-pin header, 2 dots | ground point (with ADS1115 GND) |
 
 - **Length:** 2 ft (confirmed). It leaves the bottom of the warm box and plugs into jack 1 on the bottom of the ADS1115 box. The U takes about 11-14 in (4 in down, 4 in back up, 3-6 in across), plus the plug bends and the stiffness of solid core.
 - **Warm box end:** no plug or jack. The solid-core conductors clamp straight into the 2-pin and 3-pin screw terminal blocks. The four striped GND wires are twisted and soldered together, with a single wire leaving the joint into the 2-dot (GND) terminal. The soldered joint is covered with heat shrink.
@@ -187,14 +187,14 @@ The pin assignments in the CAT5 #1 and #2 tables below are confirmed.
 
 | RJ45 pin | Wire | Signal | ADS1115 box end | Sensor end |
 |---|---|---|---|---|
-| 1 | orange-striped | GND (SHT45) | ground point | SHT45 GND |
-| 2 | orange | SDA | SDA trace | SHT45 SDA |
-| 3 | green-striped | GND (SHT45) | ground point | SHT45 GND |
-| 4 | blue | Thermistor divider tap | tap node | thermistor lead 1 |
-| 5 | blue-striped | Thermistor ground return | ground point, directly | thermistor lead 2 |
-| 6 | green | 3.3 V | 3.3 V trace | SHT45 VIN |
-| 7 | brown-striped | GND (SHT45) | ground point | SHT45 GND |
-| 8 | brown | SCL | SCL trace | SHT45 SCL |
+| 1 | green | 3.3 V | 3.3 V wire: ADS1115 VDD, jack 1 pin 1 | SHT45 VIN |
+| 2 | green-striped | GND (SHT45) | ground point (with ADS1115 GND) | SHT45 GND |
+| 3 | orange | SDA | SDA wire: ADS1115 SDA, jack 1 pin 3 | SHT45 SDA |
+| 4 | orange-striped | GND (SHT45) | ground point (with ADS1115 GND) | SHT45 GND |
+| 5 | brown | SCL | SCL wire: ADS1115 SCL, jack 1 pin 5 | SHT45 SCL |
+| 6 | brown-striped | GND (SHT45) | ground point (with ADS1115 GND) | SHT45 GND |
+| 7 | blue | Thermistor divider tap | tap node: 10k to the energize node, 1 kΩ to ADS1115 A1 | thermistor lead 1 |
+| 8 | blue-striped | Thermistor ground return | ground point (with ADS1115 GND), directly | thermistor lead 2 |
 
 - **Length:** 6-7 ft (confirmed). The run is a drip loop at the box (about 11-14 in), about 3 ft across, 1-2 ft of drop to the sensors, and about 6 in of slack inside the hood. Plug trimming and soldering use some length.
 - **Ends:** a solid-rated plug at jack 2; soldered to the sensor-end perfboard, with no plug.
@@ -204,7 +204,7 @@ The pin assignments in the CAT5 #1 and #2 tables below are confirmed.
 
 A plastic switch box with a keystone cover plate, mounted open face down beside the warm box (proposed). The plate holds two RJ45 jacks facing down: jack 1 for CAT5 #1 and jack 2 for CAT5 #2. Vent at the top, behind fine screen against insects.
 
-Everything is wired on a perfboard inside. The ADS1115 breakout plugs into female headers; the divider resistor, filters and both jacks are wired to the same perfboard. The bus traces run from jack 1 through the ADS1115 to jack 2.
+Everything is wired on a perfboard inside. The ADS1115 breakout plugs into female headers; the divider resistor, filters and both jacks are wired to the same perfboard. The SDA, SCL and 3.3 V wires run from jack 1 through the ADS1115 to jack 2.
 
 ### How the thermistor is read
 
@@ -228,10 +228,10 @@ Pin names are typical for the Lonely Binary board and not verified against it. R
 
 | Board pin | Goes to | Notes |
 |---|---|---|
-| VDD | 3.3 V trace | |
+| VDD | 3.3 V wire | |
 | GND | ground point | |
-| SCL | SCL trace | |
-| SDA | SDA trace | |
+| SCL | SCL wire | |
+| SDA | SDA wire | |
 | ADDR | not connected | pulled low on the board, which gives 0x48 |
 | ALRT | not connected | |
 | A0 | 1 kΩ from the energize node, 100 nF to the ground point | excitation monitor |
@@ -248,7 +248,7 @@ Pin names are typical for the Lonely Binary board and not verified against it. R
 | 100 nF | A0 | ground point |
 | 100 nF | A1 | ground point |
 
-- The 10k's stability matters more than its tolerance: calibration absorbs its value, not its drift.
+- The 10k's tolerance now counts as well as its stability, because the thermistor is not calibrated (0.1% is about 0.02 °C).
 - `DESIGN.md` assumes the board has no input filters of its own. Check yours, since onboard parts would add to these.
 
 ### Ground point
@@ -281,7 +281,17 @@ Pin names: VIN, 3Vo, GND, SCL, SDA. The order along the board is from memory and
 | Lead 1 | blue | divider tap |
 | Lead 2 | blue-striped | thermistor ground return, not joined to the SHT45 GND here |
 
-The thermistor is a glass-bead NTC; the glass is sealed but the leads and solder joints are bare. They stay dry in a cooking bag for steam calibration (oven bags are rated about 200 °C, and a salt-water leak test at room temperature passed). Outdoors, moisture films on bare leads could leak, so they need a bag or a coating. Not decided.
+Littelfuse 103JL1A, a glass-encapsulated DO-35 NTC (JL Series datasheet, Feb 2018). It is not calibrated: the Littelfuse curve is used as is.
+
+- 10,000 Ω at 25 °C, curve J, beta 3892 K (0-50 °C), −4.4 %/°C at 25 °C.
+- Accuracy ±0.5 °C over 0 to +100 °C (an interchangeable part). Nothing is specified below 0 °C.
+- Dissipation constant 2 mW/°C. The thermal time constant is 5 s at most in still air. Pulsed excitation keeps self-heating to a few thousandths of a degree, where continuous excitation would give about 0.14 °C.
+- Hermetically sealed glass body, about 0.16 x 0.075 in, rated −55 to +300 °C.
+- Leads: 24 AWG (0.020 in) tinned copper-clad steel, at least 1.0 in long.
+
+Conversion in firmware, resistance to temperature: Steinhart-Hart, `1/T = A + B·ln(R) + C·(ln R)³` (T in kelvin, R in ohms), with the generic 10k NTC coefficients A = 1.129148e-3, B = 2.34125e-4, C = 8.76741e-8. Against the R-T table in `/home/mike/sandbox/thermistor-103JL1A/10k-2.A.txt` (which agrees with the datasheet's R25, beta and temperature coefficient), this set is within about 0.06 °C from −30 to 100 °C, far inside the part's ±0.5 °C. Beta alone is not enough: it is off by 0.2 to 0.3 °C at 0 and 50 °C and about 2.4 °C at 100 °C. Correct the tap voltage for the ADC input loading (about 0.2% of resistance, or about 0.045 °C) before converting, with the gain held fixed.
+
+Outdoors, the leads are copper-clad steel, so cut ends or damaged tinning can rust, and moisture films on the leads or solder joints could leak. Seal the cut ends and the joints with a coating or a bag. Not decided.
 
 ### Mounting
 
@@ -320,7 +330,7 @@ Each step adds one unknown, and the scan checks it:
 1. CAT5 #1 and the ADS1115: expect 0x48.
 2. CAT5 #2 and the SHT45: expect 0x44 and a serial number.
 3. A fixed precision resistor in place of the thermistor: check the noise. This is the baseline for later.
-4. The thermistor, bagged or coated.
+4. The thermistor, with its leads and joints sealed.
 
 Each breakout adds its own pull-ups, so check the idle levels on the scan after each step.
 
@@ -331,7 +341,7 @@ Each breakout adds its own pull-ups, so check the idle levels on the scan after 
 
 ## Open items
 
-- **Thermistor protection outdoors:** a bag or a coating for the bare leads and joints.
+- **Thermistor protection outdoors:** a bag or a coating for the leads (copper-clad steel) and joints.
 - **Mounting:** the ADS1115 box (switch box and keystone plate) is proposed, not built. Mounting heights are not decided.
 - **Sensor hood:** bowl or jar, vents, the silicone seal and the hanger are proposed, not built.
 - **ADS1115 board:** read the pin names off the board, and check whether it has its own series resistors or capacitors on A0 to A3.
@@ -348,7 +358,7 @@ Concerns accepted for the prototype. Check these after the first weeks outdoors,
 - **Hood:** check the silicone around the CAT5 #2 entry (especially on polypropylene) and look for water tracks below it. Look for water on the membrane, the perfboard or the jacks; remedy with a second bowl, a skirt or a collar above the entry.
 - **Hood lag:** compare against a bare sensor for a day after any change. Humidity that stays high long after rain suggests too few vent holes.
 - **Insects and nests:** in the hood, the vent screens and the ADS1115 box.
-- **Thermistor protection:** repeat the bag leak check after the first steam calibration. Outdoors, check the bag or coating for pinholes and the leads for moisture.
+- **Thermistor protection:** check the bag or coating for pinholes, and the leads and joints for moisture or rust.
 - **Drift:** compare the SHT45 and the thermistor with a reference occasionally. A slow offset can mean a contaminated membrane or heater effects.
 - **Noise:** compare noisy thermistor readings against the fixed-resistor baseline from build step 3.
 
@@ -358,7 +368,7 @@ Figures are estimates from typical datasheet values and general reasoning, not m
 
 ### Heat and resolution
 
-- The SHT45 resolves about 0.01 °C, and the calibrated thermistor chain is budgeted at ±0.05 to 0.1 °C. Effects of thousandths of a degree can be ignored; only about 0.05 °C or more at the sensor matters.
+- The SHT45 resolves about 0.01 °C, and the uncalibrated thermistor is limited to its ±0.5 °C tolerance (an SHT45 comparison can improve it). Effects of thousandths of a degree can be ignored; only about 0.05 °C or more at the sensor matters.
 - The SHT45 breakout's power LED (a few mW) was probably the biggest steady heat source near the sensors, so it was removed. Adafruit's documentation doesn't confirm the LED, so it was checked on the board itself. The ADS1115 board still has its LED.
 - The ADS1115 (about 0.5 mW converting), the divider (about 0.5 mW, pulsed) and the SHT45 itself are small.
 

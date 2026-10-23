@@ -23,12 +23,16 @@ The apparatus sits under an open-air shed roof, which stays dry in heavy rain. I
 
 ### ESP32 boards
 
+**Table 1: ESP32 boards**
+
 | Board | Used for |
 |---|---|
 | 1 dot | Breadboard rig |
 | 2 dots | Perfboard (the wiring in this document) |
 
 ### ESP32 pins in use
+
+**Table 2: ESP32 pins in use**
 
 | GPIO | Use | Where |
 |---|---|---|
@@ -46,6 +50,8 @@ Bus 0 runs at 100 kHz with the ESP32's internal pull-ups enabled (from `i2c-scan
 
 ### Devices on bus 0
 
+**Table 3: Devices on bus 0**
+
 | Device | Address | Location | Status |
 |---|---|---|---|
 | SHT45 | 0x44 | sensor end | not yet wired on the perfboard |
@@ -60,6 +66,8 @@ No addresses conflict. The ADS1115 goes missing from a scan if CAT5 #1 is faulty
 
 The board's own wires (not the CAT5 conductors):
 
+**Table 4: Warm box wire colors**
+
 | Signal | Color |
 |---|---|
 | SDA | orange |
@@ -72,9 +80,11 @@ The board's own wires (not the CAT5 conductors):
 | SD MISO | orange (same as SDA) |
 | SD CS | yellow (same as energize) |
 
-There are no more colors, so orange and yellow are reused. 30 AWG wire is too thin for tape marks, so rely on these tables and visual inspection, and check continuity before powering up.
+There are no more colors, so orange and yellow are reused. 30 AWG wire is too thin for tape marks, so rely on Tables 4 and 6-8 and visual inspection, and check continuity before powering up.
 
 ## Power
+
+**Table 5: Power sources**
 
 | Mode | Source |
 |---|---|
@@ -88,6 +98,8 @@ There are no more colors, so orange and yellow are reused. 30 AWG wire is too th
 ## Warm box (ESP32 perfboard)
 
 ### DS3231
+
+**Table 6: DS3231 connections**
 
 | Board pin | Goes to | Wire color |
 |---|---|---|
@@ -104,6 +116,8 @@ There are no more colors, so orange and yellow are reused. 30 AWG wire is too th
 
 ### BMP388 (I2C mode)
 
+**Table 7: BMP388 connections**
+
 | Board pin | Goes to | Wire color |
 |---|---|---|
 | VIN | 3.3 V bus | green |
@@ -117,6 +131,8 @@ There are no more colors, so orange and yellow are reused. 30 AWG wire is too th
 
 ### SD card (microSD board, SPI mode)
 
+**Table 8: SD card connections**
+
 | Board pin | Function | Goes to | Wire color |
 |---|---|---|---|
 | 3V3 | power | 3.3 V bus | green |
@@ -129,13 +145,15 @@ There are no more colors, so orange and yellow are reused. 30 AWG wire is too th
 - The board has no 5 V to 3.3 V regulator. It runs from the 3.3 V bus only; never connect it to 5 V.
 - These are the ESP32's standard VSPI pins, with CS moved off GPIO5 because GPIO5 is a boot-strapping pin.
 - The board has its own pull-ups: four parts marked 103 (10 kΩ) and two brown capacitors of unknown value. It needs nothing added. The same regulator and SD board run together in two Pico projects with no problems so far.
-- If the card fails to initialise, check the supply first, then the wiring against the table.
+- If the card fails to initialise, check the supply first, then the wiring against Table 8.
 
 ### Headers
 
-Two headers, which are screw terminal blocks, carry bus 0, 3.3 V and the thermistor energize lead off the board to CAT5 #1. Pins are marked with dots, counted from 1 on each header.
+Two headers, which are screw terminal blocks, carry bus 0, 3.3 V and the thermistor energize lead off the board to CAT5 #1 (Tables 9 and 10; the "Warm box end" column of Table 11 refers to them). Pins are marked with dots, counted from 1 on each header.
 
 2-pin header (power), sitting directly on the rails with no wires:
+
+**Table 9: 2-pin header (power)**
 
 | Pin | Signal |
 |---|---|
@@ -143,6 +161,8 @@ Two headers, which are screw terminal blocks, carry bus 0, 3.3 V and the thermis
 | 2 dots | GND |
 
 3-pin header (signals):
+
+**Table 10: 3-pin header (signals)**
 
 | Pin | Signal | Goes to |
 |---|---|---|
@@ -156,7 +176,7 @@ GPIO25 was chosen because it is output-capable, is not a boot-strapping or flash
 
 ### Common to CAT5 #1 and #2
 
-The pin assignments in the CAT5 #1 and #2 tables below are confirmed.
+The pin assignments in Tables 11 and 12 (CAT5 #1 and #2) are confirmed.
 
 - **Cable:** bulk solid-core CAT5 (the cable on hand), cut to length. Solid core is stiff and can fatigue if flexed repeatedly. That risk is accepted.
 - **Plugs:** both cables have a plug only at the ADS1115 box end. Crimp RJ45 plugs rated for solid core, since ordinary stranded-wire plugs grip solid wire poorly. Test all 8 conductors with a continuity tester or cable tester before connecting anything. Don't unplug and replug often.
@@ -168,6 +188,8 @@ The pin assignments in the CAT5 #1 and #2 tables below are confirmed.
 - **Strain relief:** on both cables at every box.
 
 ### CAT5 #1: warm box to ADS1115 box (jack 1)
+
+**Table 11: CAT5 #1 pin assignments**
 
 | RJ45 pin | Wire | Signal | Warm box end (headers) | ADS1115 box end |
 |---|---|---|---|---|
@@ -185,6 +207,8 @@ The pin assignments in the CAT5 #1 and #2 tables below are confirmed.
 
 ### CAT5 #2: ADS1115 box (jack 2) to sensor end
 
+**Table 12: CAT5 #2 pin assignments**
+
 | RJ45 pin | Wire | Signal | ADS1115 box end | Sensor end |
 |---|---|---|---|---|
 | 1 | green | 3.3 V | 3.3 V wire: ADS1115 VDD, jack 1 pin 1 | SHT45 VIN |
@@ -199,6 +223,43 @@ The pin assignments in the CAT5 #1 and #2 tables below are confirmed.
 - **Length:** 6-7 ft (confirmed). The run is a drip loop at the box (about 11-14 in), about 3 ft across, 1-2 ft of drop to the sensors, and about 6 in of slack inside the hood. Plug trimming and soldering use some length.
 - **Ends:** a solid-rated plug at jack 2; soldered to the sensor-end perfboard, with no plug.
 - **Thermistor pair:** a small analog signal on the longer run. It stays in its own twisted pair, with its filter at the ADS1115 end. Build step 3 checks the noise.
+
+### Jack terminals (ADS1115 box)
+
+The two keystone jacks come from different makers. Wire both by RJ45 pin number, using the pin order in Tables 11 and 12, whatever the terminal colors say.
+
+Jack 1 (CAT5 #1) is numbered and color-coded A/B. Ignore the colors and use the terminal number (Table 13, from Table 11):
+
+**Table 13: Jack 1 terminals (numbered, CAT5 #1)**
+
+| Terminal | Cable wire | Signal | Goes to inside the box |
+|---|---|---|---|
+| 1 | green | 3.3 V | 3.3 V wire (ADS1115 VDD, jack 2 pin 1) |
+| 2 | green-striped | GND | ground point |
+| 3 | orange | SDA | SDA wire (ADS1115 SDA, jack 2 pin 3) |
+| 4 | orange-striped | GND | ground point |
+| 5 | brown | SCL | SCL wire (ADS1115 SCL, jack 2 pin 5) |
+| 6 | brown-striped | GND | ground point |
+| 7 | blue | Thermistor energize | energize node (10k, and 1 kΩ to A0) |
+| 8 | blue-striped | GND | ground point |
+
+Jack 2 (CAT5 #2) is color-coded only. Use the column that matches its colors, A or B (Table 14, from Table 12):
+
+**Table 14: Jack 2 terminals (color-only, CAT5 #2)**
+
+| Pin | Cable wire | Signal | Terminal if A-colored | Terminal if B-colored | Goes to inside the box |
+|---|---|---|---|---|---|
+| 1 | green | 3.3 V | white/green | white/orange | 3.3 V wire |
+| 2 | green-striped | GND (SHT45) | green | orange | ground point |
+| 3 | orange | SDA | white/orange | white/green | SDA wire |
+| 4 | orange-striped | GND (SHT45) | blue | blue | ground point |
+| 5 | brown | SCL | white/blue | white/blue | SCL wire |
+| 6 | brown-striped | GND (SHT45) | orange | green | ground point |
+| 7 | blue | Thermistor divider tap | white/brown | white/brown | tap node (10k, and 1 kΩ to A1) |
+| 8 | blue-striped | Thermistor ground return | brown | brown | ground point, directly |
+
+- **Colors don't match across sockets:** cable green lands on a white/green terminal on an A-colored jack and a white/orange one on a B-colored jack, and every striped GND wire lands on a different color. Check continuity from plug to terminal for all 8 pins.
+- **Pins 4, 5, 7 and 8** are the same in A and B.
 
 ## ADS1115 box
 
@@ -226,27 +287,35 @@ GPIO25 energize ──┬── 1 kΩ ──┬── A0   (100 nF from the A0 p
 
 Pin names are typical for the Lonely Binary board and not verified against it. Read them off the board before soldering.
 
-| Board pin | Goes to | Notes |
-|---|---|---|
-| VDD | 3.3 V wire | |
-| GND | ground point | |
-| SCL | SCL wire | |
-| SDA | SDA wire | |
-| ADDR | not connected | pulled low on the board, which gives 0x48 |
-| ALRT | not connected | |
-| A0 | 1 kΩ from the energize node, 100 nF to the ground point | excitation monitor |
-| A1 | 1 kΩ from the tap node, 100 nF to the ground point | thermistor voltage |
-| A2, A3 | not connected | spare, for more thermistors |
+**Table 15: ADS1115 board pins**
+
+| Board pin | Goes to | Wire color | Notes |
+|---|---|---|---|
+| VDD | 3.3 V wire | green | |
+| GND | ground point | black | |
+| SCL | SCL wire | brown | |
+| SDA | SDA wire | orange | |
+| ADDR | not connected | | pulled low on the board, which gives 0x48 |
+| ALRT | not connected | | |
+| A0 | 1 kΩ from the energize node, 100 nF to the ground point | none (component leads) | excitation monitor |
+| A1 | 1 kΩ from the tap node, 100 nF to the ground point | none (component leads) | thermistor voltage |
+| A2, A3 | not connected | | spare, for more thermistors |
 
 ### Divider and filter parts
 
-| Part | From | To |
-|---|---|---|
-| 10k resistor (0.1%, ≤15 ppm/°C) | energize node | tap node |
-| 1 kΩ (1% is fine) | energize node | A0 |
-| 1 kΩ (1% is fine) | tap node | A1 |
-| 100 nF | A0 | ground point |
-| 100 nF | A1 | ground point |
+**Table 16: Divider and filter parts**
+
+| Part | From | To | Wire color |
+|---|---|---|---|
+| 10k resistor (0.1%, ≤15 ppm/°C) | energize node | tap node | |
+| 1 kΩ (1% is fine) | energize node | A0 | |
+| 1 kΩ (1% is fine) | tap node | A1 | |
+| 100 nF | A0 | ground point | |
+| 100 nF | A1 | ground point | |
+| CAT5 #1 wire, pin 7 (jack 1 terminal 7) | jack 1 | energize node | blue |
+| CAT5 #2 wire, pin 7 (jack 2 pin 7) | jack 2 | tap node | blue |
+| CAT5 #2 wire, pin 8 (thermistor return) | jack 2 | ground point | blue-striped |
+| ADS1115 GND wire | ADS1115 GND | ground point | black |
 
 - The 10k's tolerance now counts as well as its stability, because the thermistor is not calibrated (0.1% is about 0.02 °C).
 - `DESIGN.md` assumes the board has no input filters of its own. Check yours, since onboard parts would add to these.
@@ -263,6 +332,8 @@ A small perfboard on the end of CAT5 #2, inside the hood. The SHT45 breakout plu
 
 Pin names: VIN, 3Vo, GND, SCL, SDA. The order along the board is from memory and not verified, so read it off the board before soldering.
 
+**Table 17: SHT45 connections**
+
 | Breakout pin | CAT5 #2 wire | Signal |
 |---|---|---|
 | VIN | green | 3.3 V |
@@ -275,6 +346,8 @@ Pin names: VIN, 3Vo, GND, SCL, SDA. The order along the board is from memory and
 - The board's power LED was cut off with a knife, to remove its heat.
 
 ### Thermistor
+
+**Table 18: Thermistor pads**
 
 | Pad | CAT5 #2 wire | Signal |
 |---|---|---|
@@ -315,9 +388,11 @@ The sensors hang in free air under a small cover that keeps off drips from above
 
 Each check is a small diagnostic project beside `ambient` in `esp32-dev`. In its directory, run `./build.sh`, `./flash.sh` (port `/dev/ttyUSB0`) and `./monitor.sh`. The monitor resets the board when it opens and logs to `build/monitor.log`.
 
+**Table 19: Verification projects**
+
 | Project | Checks | A pass looks like |
 |---|---|---|
-| `i2c-scan` | Both I2C buses: lines held low at idle, and every address that answers. Reads the BMP388 chip id and the SHT4x serial number. Repeats until reset. | Bus 0 idle high, with the addresses under [Devices on bus 0](#devices-on-bus-0) that are wired so far. Bus 1 has nothing. |
+| `i2c-scan` | Both I2C buses: lines held low at idle, and every address that answers. Reads the BMP388 chip id and the SHT4x serial number. Repeats until reset. | Bus 0 idle high, with the addresses in Table 3 ([Devices on bus 0](#devices-on-bus-0)) that are wired so far. Bus 1 has nothing. |
 | `rtc-probe` | The DS3231: valid time, oscillator-stop flag clear, seconds advancing, chip temperature. | `PASS`. Set the clock once first (`SET_FROM_BUILD` 1, flash, then back to 0 and reflash). The clock is kept in UTC. |
 | `sd-probe` | The SD card: mounts it (never formats), writes, reads back and deletes a file, reports size and free space. | `PASS`. A `gpio: conflict found for GPIO[4]` warning after the unmount is harmless. |
 
@@ -347,6 +422,8 @@ Each breakout adds its own pull-ups, so check the idle levels on the scan after 
 - **ADS1115 board:** read the pin names off the board, and check whether it has its own series resistors or capacitors on A0 to A3.
 - **SHT45 pin order:** read it off the Adafruit 6174 before soldering.
 - **Firmware for GPIO25:** no code drives the energize lead yet.
+- **CAT5 #1 length:** this doc says 2 ft (confirmed), but the boxes are 6-12 in apart. A cable that short cannot make the 11-14 in drip loop. Decide the actual length and the box arrangement, then update the overview diagram and the CAT5 #1 notes.
+- **Merging the boxes:** decided by the bench noise test in "Why the ADS1115 box is separate".
 
 ## Conditions to monitor
 
@@ -375,6 +452,13 @@ Figures are estimates from typical datasheet values and general reasoning, not m
 ### Why the ADS1115 box is separate
 
 A precaution, not a known problem. It keeps the 10k resistor (about 15 ppm/°C) out of the warm box's heat, and the analog inputs away from WiFi and SD current bursts. Venting helps the resistor's stability. If the fixed-resistor noise test (build step 3), logged in place, shows no wider spread than on the bench, the two boxes can be merged.
+
+The boxes sit outdoors 6-12 in apart. Reasoning so far (estimates, not measurements):
+
+- **Heat is a weak reason.** The warm box dissipates about 0.5 W in open air, and warm air rises rather than moving sideways. Even if the ADS1115 box ran 5 °C warm, the 10k would shift 75 ppm, against the thermistor's 44,000 ppm/°C (−4.4 %/°C), which is about 0.002 °C. That is far below the thermistor's ±0.5 °C tolerance.
+- **Noise is the real question.** The concern is the ESP32's own transmit and SD current bursts, not ambient WiFi. CAT5 #1 carries 3.3 V and ground to the ADS1115 box, so supply ripple reaches it whatever the distance; separation only helps with radiated pickup.
+- **Bench test, to retire the concern:** use the fixed precision resistor in place of the thermistor, with the same gain, sample count, CAT5 #1 length and shared supply as the real install. Compare the spread (standard deviation and min-to-max) with WiFi idle against heavy WiFi plus SD writes. If the spread does not change, the box can be merged and CAT5 #1 and jack 1 dropped.
+- **If noise shows up:** first add bypass capacitors at the ADS1115 VDD (10 µF plus 100 nF). A cheap shielding test is foil wrapped around the box, grounded by one wire to the ground point only, with the same measurement off, on and off again. A permanent shield would need shielded CAT5 and metal-bodied jacks to be effective. Do not shield the ESP32, since that would block its WiFi.
 
 ### Contact protection
 

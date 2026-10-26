@@ -1,6 +1,6 @@
 # Ambient wiring
 
-Wiring for the ambient logger: the ESP32 board (the warm box), the ADS1115 box, and the SHT45 and thermistor at the sensor end. The `i2c-scan`, `rtc-probe` and `sd-probe` projects check the wiring stage by stage (see [Verifying the wiring](#verifying-the-wiring)).
+Wiring for the ambient logger: the ESP32 board (the warm box), the ADS1115 box, and the SHT45 and thermistor at the sensor end. The `i2c-scan`, `rtc-probe` and `sd-probe` projects check the wiring stage by stage (see [Verifying the wiring](#verifying-the-wiring)). Firmware sampling and WiFi decisions are in [FIRMWARE.md](FIRMWARE.md).
 
 Contents: [Overview](#overview) · [Power](#power) · [Warm box](#warm-box-esp32-perfboard) · [CAT5 cables](#cat5-cables) · [ADS1115 box](#ads1115-box) · [Sensor end](#sensor-end) · [Verifying the wiring](#verifying-the-wiring) · [Open items](#open-items) · [Conditions to monitor](#conditions-to-monitor) · [Design notes](#design-notes)
 
@@ -54,8 +54,8 @@ Bus 0 runs at 100 kHz with the ESP32's internal pull-ups enabled (from `i2c-scan
 
 | Device | Address | Location | Status |
 |---|---|---|---|
-| SHT45 | 0x44 | sensor end | not yet wired on the perfboard |
-| ADS1115 | 0x48 | ADS1115 box | not yet wired |
+| SHT45 | 0x44 | sensor end | answers through CAT5 #1 and #2; serial number 0x16440c7f (SHT4x) |
+| ADS1115 | 0x48 | ADS1115 box | answers through CAT5 #1 |
 | DS3231 memory chip | 0x57 | warm box | verified |
 | DS3231 | 0x68 | warm box | verified, including the backup battery |
 | BMP388 | 0x76 | warm box | verified, chip id 0x50 |
@@ -364,7 +364,7 @@ Littelfuse 103JL1A, a glass-encapsulated DO-35 NTC (JL Series datasheet, Feb 201
 
 Conversion in firmware, resistance to temperature: Steinhart-Hart, `1/T = A + B·ln(R) + C·(ln R)³` (T in kelvin, R in ohms), with the generic 10k NTC coefficients A = 1.129148e-3, B = 2.34125e-4, C = 8.76741e-8. Against the R-T table in `/home/mike/sandbox/thermistor-103JL1A/10k-2.A.txt` (which agrees with the datasheet's R25, beta and temperature coefficient), this set is within about 0.06 °C from −30 to 100 °C, far inside the part's ±0.5 °C. Beta alone is not enough: it is off by 0.2 to 0.3 °C at 0 and 50 °C and about 2.4 °C at 100 °C. Correct the tap voltage for the ADC input loading (about 0.2% of resistance, or about 0.045 °C) before converting, with the gain held fixed.
 
-Outdoors, the leads are copper-clad steel, so cut ends or damaged tinning can rust, and moisture films on the leads or solder joints could leak. Seal the cut ends and the joints with a coating or a bag. Not decided.
+Outdoors, the leads are copper-clad steel, so cut ends or damaged tinning can rust. Fog or condensation can also leave a thin water film that leaks current between conductors. The thermistor is one place of many: see [Moisture leakage](#moisture-leakage) for all of them. Seal the cut ends and the joints with a coating or a bag. Not decided.
 
 ### Mounting
 
@@ -393,17 +393,20 @@ Each check is a small diagnostic project beside `ambient` in `esp32-dev`. In its
 | Project | Checks | A pass looks like |
 |---|---|---|
 | `i2c-scan` | Both I2C buses: lines held low at idle, and every address that answers. Reads the BMP388 chip id and the SHT4x serial number. Repeats until reset. | Bus 0 idle high, with the addresses in Table 3 ([Devices on bus 0](#devices-on-bus-0)) that are wired so far. Bus 1 has nothing. |
+| `sensor-probe` | The BMP388 and SHT45 deliver readings: chip id, SHT45 checksums, and temperature, pressure and humidity inside the range each part can report. Prints a `PASS` or `FAIL` per sensor and the BMP388 minus SHT45 temperature difference. Repeats until reset. | `PASS` for both, with plausible values. Accuracy needs a reference thermometer, barometer or hygrometer. |
 | `rtc-probe` | The DS3231: valid time, oscillator-stop flag clear, seconds advancing, chip temperature. | `PASS`. Set the clock once first (`SET_FROM_BUILD` 1, flash, then back to 0 and reflash). The clock is kept in UTC. |
 | `sd-probe` | The SD card: mounts it (never formats), writes, reads back and deletes a file, reports size and free space. | `PASS`. A `gpio: conflict found for GPIO[4]` warning after the unmount is harmless. |
 
-Results so far: `i2c-scan` shows 0x57, 0x68 and 0x76 with the headers installed and nothing connected; `rtc-probe` passed, including a power-off test on the backup battery; `sd-probe` passed with a 120 MB card at 4 MHz.
+Further wiring is suspended until `sensor-probe` confirms the BMP388 and SHT45 readings. First run (pass 3 to 6, CAT5 #1 and #2 in use): BMP388 24.95 C and 1021.4 hPa, SHT45 24.33 C and 44.3 %RH, both `PASS`, BMP388 about 0.6 C above the SHT45 (the BMP388 sits on the warm box board and the SHT45 at the sensor end). Not yet compared with a reference instrument.
+
+Results so far: `i2c-scan` (pass 11) shows all five bus 0 addresses, with CAT5 #1 and #2 in use (0x44, 0x48, 0x57, 0x68, 0x76), with the SHT4x serial number 0x16440c7f and BMP388 chip id 0x50, idle levels high on both buses and nothing on bus 1 (earlier, with nothing connected, it showed only 0x57, 0x68 and 0x76); `rtc-probe` passed, including a power-off test on the backup battery; `sd-probe` passed with a 120 MB card at 4 MHz.
 
 ### Build order for the rest
 
 Each step adds one unknown, and the scan checks it:
 
-1. CAT5 #1 and the ADS1115: expect 0x48.
-2. CAT5 #2 and the SHT45: expect 0x44 and a serial number.
+1. CAT5 #1 and the ADS1115: expect 0x48. Done (scan pass 11).
+2. CAT5 #2 and the SHT45: expect 0x44 and a serial number. Done (scan pass 11).
 3. A fixed precision resistor in place of the thermistor: check the noise. This is the baseline for later.
 4. The thermistor, with its leads and joints sealed.
 
@@ -416,7 +419,7 @@ Each breakout adds its own pull-ups, so check the idle levels on the scan after 
 
 ## Open items
 
-- **Thermistor protection outdoors:** a bag or a coating for the leads (copper-clad steel) and joints.
+- **Moisture leakage:** decide how each exposed wire, terminal and pad is protected against a fog film (Table 20 in [Moisture leakage](#moisture-leakage)), starting with the thermistor leads, joints and pads, where a bag or a coating is still to be chosen.
 - **Mounting:** the ADS1115 box (switch box and keystone plate) is proposed, not built. Mounting heights are not decided.
 - **Sensor hood:** bowl or jar, vents, the silicone seal and the hanger are proposed, not built.
 - **ADS1115 board:** read the pin names off the board, and check whether it has its own series resistors or capacitors on A0 to A3.
@@ -436,6 +439,7 @@ Concerns accepted for the prototype. Check these after the first weeks outdoors,
 - **Hood lag:** compare against a bare sensor for a day after any change. Humidity that stays high long after rain suggests too few vent holes.
 - **Insects and nests:** in the hood, the vent screens and the ADS1115 box.
 - **Thermistor protection:** check the bag or coating for pinholes, and the leads and joints for moisture or rust.
+- **Moisture leakage:** after fog or dew, compare the thermistor temperature with the SHT45's. An offset that appears with high humidity and fades as it dries points at a leak (Table 20). I2C leaks show up in the scan instead.
 - **Drift:** compare the SHT45 and the thermistor with a reference occasionally. A slow offset can mean a contaminated membrane or heater effects.
 - **Noise:** compare noisy thermistor readings against the fixed-resistor baseline from build step 3.
 
@@ -459,6 +463,29 @@ The boxes sit outdoors 6-12 in apart. Reasoning so far (estimates, not measureme
 - **Noise is the real question.** The concern is the ESP32's own transmit and SD current bursts, not ambient WiFi. CAT5 #1 carries 3.3 V and ground to the ADS1115 box, so supply ripple reaches it whatever the distance; separation only helps with radiated pickup.
 - **Bench test, to retire the concern:** use the fixed precision resistor in place of the thermistor, with the same gain, sample count, CAT5 #1 length and shared supply as the real install. Compare the spread (standard deviation and min-to-max) with WiFi idle against heavy WiFi plus SD writes. If the spread does not change, the box can be merged and CAT5 #1 and jack 1 dropped.
 - **If noise shows up:** first add bypass capacitors at the ADS1115 VDD (10 µF plus 100 nF). A cheap shielding test is foil wrapped around the box, grounded by one wire to the ground point only, with the same measurement off, on and off again. A permanent shield would need shielded CAT5 and metal-bodied jacks to be effective. Do not shield the ESP32, since that would block its WiFi.
+- **If bypass caps are not enough:** feed the ADS1115 through a ferrite bead or an LC filter, or from its own LDO. Differential inputs would cancel common-mode pickup, but this design uses single-ended inputs and spends A0 on the excitation monitor, so they are not planned. Sampling and WiFi timing are in [FIRMWARE.md](FIRMWARE.md).
+
+### Moisture leakage
+
+A thin water film from fog or condensation can carry a small current between any two conductors it bridges, on bare leads, solder joints, screw terminals, jack contacts, header pins, perfboard pads and the damp surface of a cable end. The wires and terminals throughout the system are all exposed to it, but the effect differs a lot by node: a low-impedance node shrugs off a megohm leak, while a high-impedance one does not. Leakage films are usually megohms on clean surfaces and can fall to tens of kilohms with dirt or salt. The numbers below are first-order estimates, not measurements.
+
+**Table 20: Where moisture leakage matters**
+
+| Where | What a film bridges | Effect | How it shows |
+|---|---|---|---|
+| Thermistor leads, joints and pads (sensor end) | The two leads, across the thermistor | Parallel resistance lowers the NTC's resistance, so the reading is warmer. About R/R_leak: at 25 °C (10 kΩ, −4.4 %/°C) 1 MΩ gives 1% and +0.23 °C and 10 MΩ gives +0.02 °C; at 0 °C (about 33 kΩ) 1 MΩ gives 3% and about +0.6 °C | Silent: the reading stays smooth and plausible |
+| Divider tap wire (CAT5 #2 pin 7, jack 2, A1 side) | The tap and a neighbor: GND or the thermistor return (warmer); 3.3 V, SDA, SCL or the energize node (colder) | The tap sits at 10 to 33 kΩ, so it shifts like the thermistor does. Which way depends on the neighbor | Silent |
+| Energize node and lead (GPIO25, CAT5 #1 pin 7) | GND or a neighbor | The GPIO drives it hard, and A0 reads the excitation, so the ratio cancels most of it. Only a leak of about 1 kΩ or less matters | Mostly invisible |
+| SDA and SCL (everywhere) | GND, 3.3 V or each other | The pull-ups are low impedance, so only a leak of tens of kΩ or less disturbs the bus | Loud: missing 0x44 or 0x48 in the scan, `idle levels ... LOW`, or read errors in `sensor-probe` |
+| 3.3 V to GND | The supply and ground wires | Only a few µA at 1 MΩ; harmless unless it drops to about 1 kΩ | Rarely seen |
+| DS3231 backup battery contacts (warm box) | The cell to GND | A steady drain on a cell that supplies about 1 µA, so it shortens the battery's life | Clock loses time after a power-off |
+| SHT45 and BMP388 breakout pins | Neighboring pins | Comm errors if severe. The SHT45 is humidity-rated, but its header is the wettest contact (see Contact protection) | `sensor-probe` fails or the values jump |
+
+- **The silent rows are the real risk.** I2C and supply faults announce themselves; a thermistor leak just moves the temperature by a few tenths of a degree. The sensor end is the coldest and dampest spot, and the thermistor pair is the most sensitive node, so it needs the best protection.
+- **The warm box and the ADS1115 box are warmer than the air and vented, so their films dry sooner,** but fog still reaches their screw terminals, jack contacts and perfboard through the vents and the cable holes.
+- **Cable runs:** the conductors are inside an insulating jacket, so the cable itself is safe while the jacket is whole. Water can wick into the cut end and run down the jacket, so seal the ends and keep the drip loops.
+- **Options (not decided):** conformal coating or a bag on the exposed thermistor-side joints and pads; spacing the tap pad away from 3.3 V, SDA and SCL, or putting a GND trace between them (it blocks leaks from those wires, not to GND); soldering the SHT45 straight to the perfboard. Do not coat the sensor openings; see Contact protection.
+- **No test yet.** The scan sees only the loud faults. A leak on the thermistor can be seen only by comparing it with the SHT45 in fog.
 
 ### Contact protection
 

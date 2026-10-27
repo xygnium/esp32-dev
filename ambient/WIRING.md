@@ -46,7 +46,7 @@ The apparatus sits under an open-air shed roof, which stays dry in heavy rain. I
 | 32, 33 | I2C bus 1 SDA, SCL | nothing connected, not on the headers |
 | 34 | Supply voltage sense (`ambient`) | |
 
-Bus 0 runs at 100 kHz with the ESP32's internal pull-ups enabled (from `i2c-scan/main/main.c`).
+Bus 0 runs at 100 kHz. The breakout boards' own pull-ups carry the bus; the ESP32's internal pull-ups are also enabled (from `i2c-scan/main/main.c`), but they are too weak to run the cables on their own.
 
 ### Devices on bus 0
 
@@ -91,9 +91,9 @@ There are no more colors, so orange and yellow are reused. 30 AWG wire is too th
 | Development | USB |
 | Production | 2.5 mm barrel jack |
 
-- **5 V bus:** joins the ESP32's VIN pin, the barrel jack's 5 V and the 3.3 V regulator's input. On USB, the ESP32 board's USB 5 V reaches the bus through VIN. In production the jack feeds the bus, and so VIN. The regulator runs in both modes, so the 3.3 V bus comes up and goes down with the ESP32.
+- **5 V bus:** joins the ESP32's VIN pin, the barrel jack's 5 V and the 3.3 V regulator's input. On USB, the ESP32 board's USB 5 V reaches the bus through VIN. The board has no diode between USB 5 V and VIN (checked), so the bus gets the full USB voltage. In production the jack feeds the bus, and so VIN. The regulator runs in both modes, so the 3.3 V bus comes up and goes down with the ESP32.
 - **3.3 V bus:** the regulator's output. It feeds every I2C device, the SD board and the 2-pin header. It is not connected to the ESP32's 3V3 pin. The regulator's ground is common with the ESP32's.
-- **One source at a time.** The user is responsible for never connecting USB and the barrel jack together.
+- **One source at a time.** The user is responsible for never connecting USB and the barrel jack together. With no diode, the jack would feed back into the USB port.
 
 ## Warm box (ESP32 perfboard)
 
@@ -184,7 +184,7 @@ The pin assignments in Tables 11 and 12 (CAT5 #1 and #2) are confirmed.
 - **Pin order:** deliberately not T568A/B, because these are not Ethernet cables. RJ45 pins 1-8 are green, green-striped, orange, orange-striped, brown, brown-striped, blue, blue-striped, so each signal wire sits next to its striped ground on adjacent pins (1-2 3.3 V, 3-4 SDA, 5-6 SCL, 7-8 thermistor). Use the same order at both ends of each cable and in both CAT5 #1 and #2. Keystone jacks carry T568A/B color labels: ignore them and wire by pin number.
 - **Jacks and holes:** jacks face down. Seal each cable hole with a grommet or sealant, since the boxes are vented for air, not water. Label the jacks "NOT ETHERNET": they carry 3.3 V, and plugging one into a network port (especially PoE) can damage a part.
 - **Drip loops:** where a cable leaves the bottom of a box, it hangs in a U at least 3-4 in deep, with its lowest point below the hole and a gentle radius, so water drips off before it reaches a jack or hole.
-- **Capacitance:** about 50 pF per metre. CAT5 #1 (about 20 pF) and #2 (about 100 pF) total about 120 pF before the boards' own, well under the 400 pF I2C limit, so the 100 kHz clock stays.
+- **Capacitance:** about 50 pF per metre. CAT5 #1 (about 30 pF) and #2 (about 100 pF) total about 130 pF before the boards' own, well under the 400 pF I2C limit, so the 100 kHz clock stays.
 - **Strain relief:** on both cables at every box.
 
 ### CAT5 #1: warm box to ADS1115 box (jack 1)
@@ -199,7 +199,7 @@ The pin assignments in Tables 11 and 12 (CAT5 #1 and #2) are confirmed.
 | 4 | orange-striped | GND | 2-pin header, 2 dots | ground point (with ADS1115 GND) |
 | 5 | brown | SCL | 3-pin header, 2 dots | SCL wire: ADS1115 SCL, jack 2 pin 5 |
 | 6 | brown-striped | GND | 2-pin header, 2 dots | ground point (with ADS1115 GND) |
-| 7 | blue | Thermistor energize | 3-pin header, 3 dots | energize node: 10k to the tap node, 1 kΩ to ADS1115 A0 |
+| 7 | blue | Thermistor energize | 3-pin header, 3 dots | energize node: 10k to the tap node, A0 divider to ADS1115 A0 |
 | 8 | blue-striped | GND | 2-pin header, 2 dots | ground point (with ADS1115 GND) |
 
 - **Length:** 2 ft (confirmed). It leaves the bottom of the warm box and plugs into jack 1 on the bottom of the ADS1115 box. The U takes about 11-14 in (4 in down, 4 in back up, 3-6 in across), plus the plug bends and the stiffness of solid core.
@@ -240,7 +240,7 @@ Jack 1 (CAT5 #1) is numbered and color-coded A/B. Ignore the colors and use the 
 | 4 | orange-striped | GND | ground point |
 | 5 | brown | SCL | SCL wire (ADS1115 SCL, jack 2 pin 5) |
 | 6 | brown-striped | GND | ground point |
-| 7 | blue | Thermistor energize | energize node (10k, and 1 kΩ to A0) |
+| 7 | blue | Thermistor energize | energize node (10k, and the A0 divider) |
 | 8 | blue-striped | GND | ground point |
 
 Jack 2 (CAT5 #2) is color-coded only. Use the column that matches its colors, A or B (Table 14, from Table 12):
@@ -271,13 +271,16 @@ Everything is wired on a perfboard inside. The ADS1115 breakout plugs into femal
 
 From `ads1115-dev/DESIGN.md`:
 
-- Ratiometric reading with pulsed excitation: GPIO25 drives the divider only while a conversion runs.
-- A0 reads the excitation voltage and A1 reads the divider tap. The thermistor value comes from the ratio A1 ÷ A0, so ADC reference and supply errors cancel.
+- Ratiometric reading with pulsed excitation: GPIO25 drives the divider from about 20 ms before the first conversion until the last one ends (see FIRMWARE.md, Table 1).
+- A0 reads half the excitation voltage and A1 reads the divider tap. The thermistor value comes from the ratio A1 ÷ (2 × A0), so ADC reference and supply errors cancel.
+- A0 reads through a divider of two equal 10k resistors (0.1%, the same part as the divider's 10k) because GPIO25's high level is the ESP32 board's own 3.3 V, which moves with the ESP32's load and can sit above the ADS1115's supply (the separate 3.3 V bus). At half the excitation, A0 always stays well inside the ADS1115's input range.
 - Inputs are single-ended, with the same gain setting on every input. One chip takes the excitation monitor plus up to 3 thermistors.
 
 ```
-GPIO25 energize ──┬── 1 kΩ ──┬── A0   (100 nF from the A0 pin to the ground point)
- (CAT5 #1 blue)   │
+GPIO25 energize ──┬── 10k ───┬── A0   (100 nF from the A0 pin to the ground point)
+ (CAT5 #1 blue)   │          │
+                  │          └── 10k ── ground point
+                  │
                   └── 10k ───┬── tap ── 1 kΩ ──┬── A1   (100 nF from the A1 pin to the ground point)
                              │
                              └── CAT5 #2 blue ── thermistor ── CAT5 #2 blue-striped ── ground point
@@ -297,7 +300,7 @@ Pin names are typical for the Lonely Binary board and not verified against it. R
 | SDA | SDA wire | orange | |
 | ADDR | not connected | | pulled low on the board, which gives 0x48 |
 | ALRT | not connected | | |
-| A0 | 1 kΩ from the energize node, 100 nF to the ground point | none (component leads) | excitation monitor |
+| A0 | midpoint of the A0 divider (10k from the energize node, 10k to the ground point), 100 nF to the ground point | none (component leads) | excitation monitor, reads half the excitation |
 | A1 | 1 kΩ from the tap node, 100 nF to the ground point | none (component leads) | thermistor voltage |
 | A2, A3 | not connected | | spare, for more thermistors |
 
@@ -308,7 +311,8 @@ Pin names are typical for the Lonely Binary board and not verified against it. R
 | Part | From | To | Wire color |
 |---|---|---|---|
 | 10k resistor (0.1%, ≤15 ppm/°C) | energize node | tap node | |
-| 1 kΩ (1% is fine) | energize node | A0 | |
+| 10k resistor (0.1%, ≤15 ppm/°C), A0 divider top | energize node | A0 | |
+| 10k resistor (0.1%, ≤15 ppm/°C), A0 divider bottom | A0 | ground point | |
 | 1 kΩ (1% is fine) | tap node | A1 | |
 | 100 nF | A0 | ground point | |
 | 100 nF | A1 | ground point | |
@@ -318,6 +322,9 @@ Pin names are typical for the Lonely Binary board and not verified against it. R
 | ADS1115 GND wire | ADS1115 GND | ground point | black |
 
 - The 10k's tolerance now counts as well as its stability, because the thermistor is not calibrated (0.1% is about 0.02 °C).
+- The A0 divider's ratio enters the result directly, so its two resistors need the same precision. Two 0.1% parts keep the ratio within about 0.1%, which is about 0.05 °C at 25 °C, 0.08 °C at 0 °C and 0.18 °C at −20 °C. Matched parts, or measuring the ratio once on the bench, would do better.
+- The divider draws about 0.17 mA from GPIO25 while the excitation is on.
+- A0 sits at 5 kΩ, so the ADC input loading lowers it by about 0.1%. Firmware corrects it the same way as A1's loading (see Thermistor), using the same input-impedance figure.
 - `DESIGN.md` assumes the board has no input filters of its own. Check yours, since onboard parts would add to these.
 
 ### Ground point
@@ -358,13 +365,13 @@ Littelfuse 103JL1A, a glass-encapsulated DO-35 NTC (JL Series datasheet, Feb 201
 
 - 10,000 Ω at 25 °C, curve J, beta 3892 K (0-50 °C), −4.4 %/°C at 25 °C.
 - Accuracy ±0.5 °C over 0 to +100 °C (an interchangeable part). Nothing is specified below 0 °C.
-- Dissipation constant 2 mW/°C. The thermal time constant is 5 s at most in still air. Pulsed excitation keeps self-heating to a few thousandths of a degree, where continuous excitation would give about 0.14 °C.
+- Dissipation constant 2 mW/°C. The thermal time constant is 5 s in still air. With one A0, A1, A0 set per reading (about 0.4 s of excitation at 8 SPS), self-heating is about 0.006 °C, where continuous excitation would give about 0.14 °C.
 - Hermetically sealed glass body, about 0.16 x 0.075 in, rated −55 to +300 °C.
 - Leads: 24 AWG (0.020 in) tinned copper-clad steel, at least 1.0 in long.
 
-Conversion in firmware, resistance to temperature: Steinhart-Hart, `1/T = A + B·ln(R) + C·(ln R)³` (T in kelvin, R in ohms), with the generic 10k NTC coefficients A = 1.129148e-3, B = 2.34125e-4, C = 8.76741e-8. Against the R-T table in `/home/mike/sandbox/thermistor-103JL1A/10k-2.A.txt` (which agrees with the datasheet's R25, beta and temperature coefficient), this set is within about 0.06 °C from −30 to 100 °C, far inside the part's ±0.5 °C. Beta alone is not enough: it is off by 0.2 to 0.3 °C at 0 and 50 °C and about 2.4 °C at 100 °C. Correct the tap voltage for the ADC input loading (about 0.2% of resistance, or about 0.045 °C) before converting, with the gain held fixed.
+Conversion in firmware, resistance to temperature: Steinhart-Hart, `1/T = A + B·ln(R) + C·(ln R)³` (T in kelvin, R in ohms), with the generic 10k NTC coefficients A = 1.129148e-3, B = 2.34125e-4, C = 8.76741e-8. Against the R-T table in `/home/mike/sandbox/thermistor-103JL1A/10k-2.A.txt` (which agrees with the datasheet's R25, beta and temperature coefficient), this set is within about 0.06 °C from −30 to 100 °C, far inside the part's ±0.5 °C. Beta alone is not enough: it is off by 0.2 to 0.3 °C at 0 and 50 °C and about 2.4 °C at 100 °C. Correct the tap voltage for the ADC input loading before converting, with the gain held fixed. The loading acts like a leak of about 4-6 MΩ across the thermistor. The TI datasheet gives 6 MΩ common-mode and 15 MΩ differential input impedance at ±4.096 V; with A1 measured against ground the two may act in parallel, which gives about 4.3 MΩ (not checked against the datasheet's input model). At 4.3 MΩ the error is about 0.23% of resistance (0.05 °C) at 25 °C, 0.75% (0.15 °C) at 0 °C and 2.2% (0.39 °C) at −20 °C, so the correction depends on temperature.
 
-Outdoors, the leads are copper-clad steel, so cut ends or damaged tinning can rust. Fog or condensation can also leave a thin water film that leaks current between conductors. The thermistor is one place of many: see [Moisture leakage](#moisture-leakage) for all of them. Seal the cut ends and the joints with a coating or a bag. Not decided.
+Outdoors, the leads are copper-clad steel, so cut ends or damaged tinning can rust. Fog or condensation can also leave a thin water film that leaks current between conductors. The thermistor is one place of many: see [Moisture leakage](#moisture-leakage) for all of them. The conformal coating on the thermistor circuit seals the cut ends and the joints.
 
 ### Mounting
 
@@ -393,11 +400,11 @@ Each check is a small diagnostic project beside `ambient` in `esp32-dev`. In its
 | Project | Checks | A pass looks like |
 |---|---|---|
 | `i2c-scan` | Both I2C buses: lines held low at idle, and every address that answers. Reads the BMP388 chip id and the SHT4x serial number. Repeats until reset. | Bus 0 idle high, with the addresses in Table 3 ([Devices on bus 0](#devices-on-bus-0)) that are wired so far. Bus 1 has nothing. |
-| `sensor-probe` | The BMP388 and SHT45 deliver readings: chip id, SHT45 checksums, and temperature, pressure and humidity inside the range each part can report. Prints a `PASS` or `FAIL` per sensor and the BMP388 minus SHT45 temperature difference. Repeats until reset. | `PASS` for both, with plausible values. Accuracy needs a reference thermometer, barometer or hygrometer. |
+| `sensor-probe` | The BMP388 and SHT45 deliver readings: chip id (a BMP390 is also accepted), SHT45 checksums, and temperature, pressure and humidity inside each part's operating range. Prints a `PASS` or `FAIL` per sensor and the BMP388 minus SHT45 temperature difference. Repeats until reset. | `PASS` for both, with plausible values. Accuracy needs a reference thermometer, barometer or hygrometer. |
 | `rtc-probe` | The DS3231: valid time, oscillator-stop flag clear, seconds advancing, chip temperature. | `PASS`. Set the clock once first (`SET_FROM_BUILD` 1, flash, then back to 0 and reflash). The clock is kept in UTC. |
 | `sd-probe` | The SD card: mounts it (never formats), writes, reads back and deletes a file, reports size and free space. | `PASS`. A `gpio: conflict found for GPIO[4]` warning after the unmount is harmless. |
 
-Further wiring is suspended until `sensor-probe` confirms the BMP388 and SHT45 readings. First run (pass 3 to 6, CAT5 #1 and #2 in use): BMP388 24.95 C and 1021.4 hPa, SHT45 24.33 C and 44.3 %RH, both `PASS`, BMP388 about 0.6 C above the SHT45 (the BMP388 sits on the warm box board and the SHT45 at the sensor end). Not yet compared with a reference instrument.
+Further wiring is suspended until `sensor-probe` confirms the BMP388 and SHT45 readings. First run (pass 3 to 6, CAT5 #1 and #2 in use): BMP388 24.95 C and 1021.4 hPa, SHT45 24.33 C and 44.3 %RH, both `PASS`, BMP388 about 0.6 C above the SHT45. That is expected: the BMP388's temperature is the warm box's temperature, not the air's, so it isn't meant to match the SHT45. The BMP388 is there for pressure. Not yet compared with a reference instrument.
 
 Results so far: `i2c-scan` (pass 11) shows all five bus 0 addresses, with CAT5 #1 and #2 in use (0x44, 0x48, 0x57, 0x68, 0x76), with the SHT4x serial number 0x16440c7f and BMP388 chip id 0x50, idle levels high on both buses and nothing on bus 1 (earlier, with nothing connected, it showed only 0x57, 0x68 and 0x76); `rtc-probe` passed, including a power-off test on the backup battery; `sd-probe` passed with a 120 MB card at 4 MHz.
 
@@ -419,13 +426,11 @@ Each breakout adds its own pull-ups, so check the idle levels on the scan after 
 
 ## Open items
 
-- **Moisture leakage:** decide how each exposed wire, terminal and pad is protected against a fog film (Table 20 in [Moisture leakage](#moisture-leakage)), starting with the thermistor leads, joints and pads, where a bag or a coating is still to be chosen.
 - **Mounting:** the ADS1115 box (switch box and keystone plate) is proposed, not built. Mounting heights are not decided.
 - **Sensor hood:** bowl or jar, vents, the silicone seal and the hanger are proposed, not built.
 - **ADS1115 board:** read the pin names off the board, and check whether it has its own series resistors or capacitors on A0 to A3.
 - **SHT45 pin order:** read it off the Adafruit 6174 before soldering.
 - **Firmware for GPIO25:** no code drives the energize lead yet.
-- **CAT5 #1 length:** this doc says 2 ft (confirmed), but the boxes are 6-12 in apart. A cable that short cannot make the 11-14 in drip loop. Decide the actual length and the box arrangement, then update the overview diagram and the CAT5 #1 notes.
 - **Merging the boxes:** decided by the bench noise test in "Why the ADS1115 box is separate".
 
 ## Conditions to monitor
@@ -473,18 +478,18 @@ A thin water film from fog or condensation can carry a small current between any
 
 | Where | What a film bridges | Effect | How it shows |
 |---|---|---|---|
-| Thermistor leads, joints and pads (sensor end) | The two leads, across the thermistor | Parallel resistance lowers the NTC's resistance, so the reading is warmer. About R/R_leak: at 25 °C (10 kΩ, −4.4 %/°C) 1 MΩ gives 1% and +0.23 °C and 10 MΩ gives +0.02 °C; at 0 °C (about 33 kΩ) 1 MΩ gives 3% and about +0.6 °C | Silent: the reading stays smooth and plausible |
-| Divider tap wire (CAT5 #2 pin 7, jack 2, A1 side) | The tap and a neighbor: GND or the thermistor return (warmer); 3.3 V, SDA, SCL or the energize node (colder) | The tap sits at 10 to 33 kΩ, so it shifts like the thermistor does. Which way depends on the neighbor | Silent |
-| Energize node and lead (GPIO25, CAT5 #1 pin 7) | GND or a neighbor | The GPIO drives it hard, and A0 reads the excitation, so the ratio cancels most of it. Only a leak of about 1 kΩ or less matters | Mostly invisible |
-| SDA and SCL (everywhere) | GND, 3.3 V or each other | The pull-ups are low impedance, so only a leak of tens of kΩ or less disturbs the bus | Loud: missing 0x44 or 0x48 in the scan, `idle levels ... LOW`, or read errors in `sensor-probe` |
+| Thermistor leads, joints and pads (sensor end) | The two leads, across the thermistor | Parallel resistance lowers the NTC's resistance, so the reading is warmer. About R/R_leak: at 25 °C (10 kΩ, −4.4 %/°C) 1 MΩ gives 1% and +0.23 °C and 10 MΩ gives +0.02 °C; at 0 °C (about 33 kΩ) 1 MΩ gives 3% and about +0.6 °C; at −20 °C (about 97 kΩ) 1 MΩ gives 9% and about +1.6 °C. A dirty film of 100 kΩ gives about +2.2 °C even at 25 °C | Silent: the reading stays smooth and plausible |
+| Divider tap (CAT5 #2 pin 7, jack 2, and in the ADS1115 box the 1 kΩ, the 100 nF and the A1 pin) | The tap and a neighbor: GND or the thermistor return (warmer); 3.3 V, SDA, SCL or the energize node (colder) | A leak to GND or the thermistor return is the same as a leak across the thermistor (row above). A leak to a neighbor at a high voltage shifts the reading by about −0.2 °C per 1 MΩ at any temperature from −20 to 40 °C, so in the cold it is smaller than a GND leak (−0.19 °C against +0.63 °C at 0 °C). At jack 2, pin 7's only neighbors are pins 6 and 8, both ground, so a leak there reads warmer | Silent |
+| Energize node and lead (GPIO25, CAT5 #1 pin 7) | GND or a neighbor | A0 reads the energize node through its divider, so a steady leak cancels in the ratio, as long as the leak current stays within what the GPIO can drive. A leak at A0 itself is different: A0 sits at 5 kΩ, so a 1 MΩ leak to GND lowers it by 0.5% and the reading goes colder by about 0.2 °C at 25 °C, as sensitive as the tap | Silent at A0, otherwise mostly invisible |
+| SDA and SCL (everywhere) | GND, 3.3 V or each other | The breakout boards' pull-ups hold the lines firmly, so only a strong leak disturbs the bus | Loud: missing 0x44 or 0x48 in the scan, `idle levels ... LOW`, or read errors in `sensor-probe` |
 | 3.3 V to GND | The supply and ground wires | Only a few µA at 1 MΩ; harmless unless it drops to about 1 kΩ | Rarely seen |
-| DS3231 backup battery contacts (warm box) | The cell to GND | A steady drain on a cell that supplies about 1 µA, so it shortens the battery's life | Clock loses time after a power-off |
+| DS3231 backup battery contacts (warm box) | The cell to GND | A steady drain on a cell that supplies about 1 µA, so it shortens the battery's life | Clock resets, or the oscillator-stop flag is set, after a power-off |
 | SHT45 and BMP388 breakout pins | Neighboring pins | Comm errors if severe. The SHT45 is humidity-rated, but its header is the wettest contact (see Contact protection) | `sensor-probe` fails or the values jump |
 
-- **The silent rows are the real risk.** I2C and supply faults announce themselves; a thermistor leak just moves the temperature by a few tenths of a degree. The sensor end is the coldest and dampest spot, and the thermistor pair is the most sensitive node, so it needs the best protection.
-- **The warm box and the ADS1115 box are warmer than the air and vented, so their films dry sooner,** but fog still reaches their screw terminals, jack contacts and perfboard through the vents and the cable holes.
+- **The silent rows are the real risk.** I2C and supply faults announce themselves; a thermistor leak just moves the temperature. A clean film at room temperature moves it by tenths of a degree; a dirty film, or the same film in cold weather, moves it by degrees. The thermistor circuit is the most sensitive node, from the thermistor pads at the sensor end to A0 and A1 in the ADS1115 box, so all of it needs the best protection.
+- **The warm box is warmer than the air and vented, so its films dry sooner.** The ADS1115 box dissipates only about a milliwatt, so it sits at air temperature and its films dry no sooner than the sensor end's. Fog reaches the screw terminals, jack contacts and perfboard in both boxes through the vents and the cable holes.
 - **Cable runs:** the conductors are inside an insulating jacket, so the cable itself is safe while the jacket is whole. Water can wick into the cut end and run down the jacket, so seal the ends and keep the drip loops.
-- **Options (not decided):** conformal coating or a bag on the exposed thermistor-side joints and pads; spacing the tap pad away from 3.3 V, SDA and SCL, or putting a GND trace between them (it blocks leaks from those wires, not to GND); soldering the SHT45 straight to the perfboard. Do not coat the sensor openings; see Contact protection.
+- **Decided: conformal coating on the thermistor circuit only.** At the sensor end that is the thermistor's leads, joints and pads. In the ADS1115 box it is the divider and filter parts and the ADS1115's header pins; the ADS1115 board itself is not coated. Mask the connectors and jacks, and keep the coating off the SHT45 (see Contact protection). The I2C wiring is not coated: its faults show up in the scan. Spacing the tap and A0 pads away from 3.3 V, SDA, SCL and GND adds margin (a GND guard trace beside them is not recommended: a leak to it reads warmer, which is the larger error in the cold).
 - **No test yet.** The scan sees only the loud faults. A leak on the thermistor can be seen only by comparing it with the SHT45 in fog.
 
 ### Contact protection

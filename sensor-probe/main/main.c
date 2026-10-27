@@ -1,9 +1,11 @@
 // Sensor probe, kept as a permanent diagnostic. Repeats every READ_PERIOD_MS.
-// Bus 0: SDA = D21, SCL = D22, 100 kHz, with the ESP32's weak pull-ups on.
+// Bus 0: SDA = D21, SCL = D22, 100 kHz. The breakout boards' pull-ups carry the
+//   bus; the ESP32's weak internal pull-ups are on as well.
 // Each pass reads the BMP388 (0x76) and the SHT45 (0x44) and prints the
 //   compensated values with a PASS or FAIL for each sensor.
 // PASS means the reads succeeded, the checksums (SHT45) and chip id (BMP388)
-//   were right, and the values are inside the range the part can report.
+//   were right, and the values are inside the part's specified operating range
+//   (the SHT45's humidity is allowed 5 % either side of 0..100 %).
 // It can't say the values are accurate; compare them with a reference.
 #include <stdbool.h>
 #include <stdint.h>
@@ -21,6 +23,7 @@
 
 #define BMP388_ADDR     0x76
 #define BMP388_CHIP_ID  0x50
+#define BMP390_CHIP_ID  0x60   // same registers and compensation as the BMP388
 #define BMP388_REG_CHIP_ID 0x00
 #define BMP388_REG_ERR  0x02
 #define BMP388_REG_STATUS 0x03
@@ -29,10 +32,18 @@
 #define BMP388_REG_CALIB 0x31
 #define BMP388_REG_CMD  0x7E
 #define BMP388_CMD_SOFT_RESET 0xB6
+#define BMP388_ERR_CMD  0x02
+// Bosch's driver waits 2 ms after a soft reset. Two ticks at the 100 Hz tick
+//   rate give at least 10 ms.
+#define BMP388_RESET_MS 20
 // Pressure on, temperature on, forced mode (one measurement, then sleep).
 #define BMP388_PWR_FORCED 0x13
 #define BMP388_STATUS_DRDY (0x20 | 0x40)   // pressure and temperature ready
-#define BMP388_WAIT_MS  60
+// The longest forced measurement, both channels at x32 oversampling, takes
+//   234 + (392 + 32 * 2000) + (313 + 32 * 2000) us, about 129 ms (timing
+//   constants from Bosch's BMP3 driver). The reset defaults use less
+//   oversampling, so the measurement normally finishes much sooner.
+#define BMP388_TIMEOUT_MS 150
 
 #define SHT4X_ADDR      0x44
 #define SHT4X_CMD_MEASURE_HIGH 0xFD
@@ -114,8 +125,25 @@ static bool bmp388_read(i2c_master_bus_handle_t bus, double *temp_c, double *pre
         printf("  BMP388 chip id read FAILED: %s\n", esp_err_to_name(err));
         goto out;
     }
-    if (id != BMP388_CHIP_ID) {
-        printf("  BMP388 chip id 0x%02x: not a BMP388 (expected 0x%02x)\n", id, BMP388_CHIP_ID);
+    if (id != BMP388_CHIP_ID && id != BMP390_CHIP_ID) {
+        printf("  BMP388 chip id 0x%02x: not a BMP388 or BMP390 (expected 0x%02x or 0x%02x)\n",
+               id, BMP388_CHIP_ID, BMP390_CHIP_ID);
+        goto out;
+    }
+    // The sensor stays powered across an ESP32 reset, so settings left by
+    //   other firmware (oversampling, IIR filter, mode) would carry over.
+    //   A soft reset puts every register back to its default.
+    err = bmp_write(dev, BMP388_REG_CMD, BMP388_CMD_SOFT_RESET);
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(BMP388_RESET_MS));
+        err = bmp_read(dev, BMP388_REG_ERR, &err_reg, 1);
+    }
+    if (err != ESP_OK) {
+        printf("  BMP388 soft reset FAILED: %s\n", esp_err_to_name(err));
+        goto out;
+    }
+    if (err_reg & BMP388_ERR_CMD) {
+        printf("  BMP388 soft reset rejected: error 0x%02x\n", err_reg);
         goto out;
     }
     err = bmp_read(dev, BMP388_REG_CALIB, cal, sizeof cal);
@@ -130,8 +158,13 @@ static bool bmp388_read(i2c_master_bus_handle_t bus, double *temp_c, double *pre
         printf("  BMP388 start of measurement FAILED: %s\n", esp_err_to_name(err));
         goto out;
     }
-    vTaskDelay(pdMS_TO_TICKS(BMP388_WAIT_MS));
-    err = bmp_read(dev, BMP388_REG_STATUS, &st, 1);
+    // Poll until both results are ready, or give up after BMP388_TIMEOUT_MS.
+    TickType_t start = xTaskGetTickCount();
+    do {
+        vTaskDelay(1);
+        err = bmp_read(dev, BMP388_REG_STATUS, &st, 1);
+    } while (err == ESP_OK && (st & BMP388_STATUS_DRDY) != BMP388_STATUS_DRDY
+             && xTaskGetTickCount() - start < pdMS_TO_TICKS(BMP388_TIMEOUT_MS));
     if (err == ESP_OK) {
         err = bmp_read(dev, BMP388_REG_ERR, &err_reg, 1);
     }

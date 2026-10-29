@@ -17,7 +17,7 @@ The apparatus sits under an open-air shed roof, which stays dry in heavy rain. I
 ```
 
 - **Warm box:** the ESP32 perfboard. It is the largest heat source, roughly half a watt with WiFi.
-- **ADS1115 box:** the ADS1115, the 10k divider resistor and the input filters, kept out of the warm box's heat and away from WiFi and SD current bursts.
+- **ADS1115 box:** the ADS1115, the 10k divider resistor, the excitation switch and the input filters, kept out of the warm box's heat and away from WiFi and SD current bursts.
 - **Sensor end:** the SHT45 and the thermistor side by side at the same height, about 3 ft from the warm box, well below the roof and away from walls and the ground.
 - **Warm air rises,** so both boxes go above or level with the sensors, never below them.
 
@@ -38,7 +38,7 @@ The apparatus sits under an open-air shed roof, which stays dry in heavy rain. I
 |---|---|---|
 | 21 | I2C bus 0 SDA | warm box, 3-pin header |
 | 22 | I2C bus 0 SCL | warm box, 3-pin header |
-| 25 | Thermistor energize | 3-pin header |
+| 25 | Thermistor switch (drives the AO3401 gate, low = on) | 3-pin header |
 | 18 | SD CLK | SD board |
 | 19 | SD MISO | SD board |
 | 23 | SD MOSI | SD board |
@@ -74,11 +74,11 @@ The board's own wires (not the CAT5 conductors):
 | SCL | brown |
 | 3.3 V | green |
 | GND | black |
-| Thermistor energize | yellow |
+| Thermistor switch | yellow |
 | SD CLK | blue |
 | SD MOSI | purple |
 | SD MISO | orange (same as SDA) |
-| SD CS | yellow (same as energize) |
+| SD CS | yellow (same as thermistor switch) |
 
 There are no more colors, so orange and yellow are reused. 30 AWG wire is too thin for tape marks, so rely on Tables 4 and 6-8 and visual inspection, and check continuity before powering up.
 
@@ -149,7 +149,7 @@ There are no more colors, so orange and yellow are reused. 30 AWG wire is too th
 
 ### Headers
 
-Two headers, which are screw terminal blocks, carry bus 0, 3.3 V and the thermistor energize lead off the board to CAT5 #1 (Tables 9 and 10; the "Warm box end" column of Table 11 refers to them). Pins are marked with dots, counted from 1 on each header.
+Two headers, which are screw terminal blocks, carry bus 0, 3.3 V and the thermistor switch lead off the board to CAT5 #1 (Tables 9 and 10; the "Warm box end" column of Table 11 refers to them). Pins are marked with dots, counted from 1 on each header.
 
 2-pin header (power), sitting directly on the rails with no wires:
 
@@ -168,7 +168,7 @@ Two headers, which are screw terminal blocks, carry bus 0, 3.3 V and the thermis
 |---|---|---|
 | 1 dot | SDA | D21 |
 | 2 dots | SCL | D22 |
-| 3 dots | Thermistor energize | D25 (GPIO25) |
+| 3 dots | Thermistor switch | D25 (GPIO25) |
 
 GPIO25 was chosen because it is output-capable, is not a boot-strapping or flash pin, and no project in this repo uses it.
 
@@ -199,7 +199,7 @@ The pin assignments in Tables 11 and 12 (CAT5 #1 and #2) are confirmed.
 | 4 | orange-striped | GND | 2-pin header, 2 dots | ground point (with ADS1115 GND) |
 | 5 | brown | SCL | 3-pin header, 2 dots | SCL wire: ADS1115 SCL, jack 2 pin 5 |
 | 6 | brown-striped | GND | 2-pin header, 2 dots | ground point (with ADS1115 GND) |
-| 7 | blue | Thermistor energize | 3-pin header, 3 dots | energize node: 10k to the tap node, A0 divider to ADS1115 A0 |
+| 7 | blue | Thermistor switch | 3-pin header, 3 dots | AO3401 gate (100k pull-up to the 3.3 V wire) |
 | 8 | blue-striped | GND | 2-pin header, 2 dots | ground point (with ADS1115 GND) |
 
 - **Length:** 2 ft (confirmed). It leaves the bottom of the warm box and plugs into jack 1 on the bottom of the ADS1115 box. The U takes about 11-14 in (4 in down, 4 in back up, 3-6 in across), plus the plug bends and the stiffness of solid core.
@@ -240,7 +240,7 @@ Jack 1 (CAT5 #1) is numbered and color-coded A/B. Ignore the colors and use the 
 | 4 | orange-striped | GND | ground point |
 | 5 | brown | SCL | SCL wire (ADS1115 SCL, jack 2 pin 5) |
 | 6 | brown-striped | GND | ground point |
-| 7 | blue | Thermistor energize | energize node (10k, and the A0 divider) |
+| 7 | blue | Thermistor switch | AO3401 gate (and its 100k pull-up) |
 | 8 | blue-striped | GND | ground point |
 
 Jack 2 (CAT5 #2) is color-coded only. Use the column that matches its colors, A or B (Table 14, from Table 12):
@@ -265,25 +265,33 @@ Jack 2 (CAT5 #2) is color-coded only. Use the column that matches its colors, A 
 
 A plastic switch box with a keystone cover plate, mounted open face down beside the warm box (proposed). The plate holds two RJ45 jacks facing down: jack 1 for CAT5 #1 and jack 2 for CAT5 #2. Vent at the top, behind fine screen against insects.
 
-Everything is wired on a perfboard inside. The ADS1115 breakout plugs into female headers; the divider resistor, filters and both jacks are wired to the same perfboard. The SDA, SCL and 3.3 V wires run from jack 1 through the ADS1115 to jack 2.
+Everything is wired on a perfboard inside. The ADS1115 breakout plugs into female headers; the divider resistor, the excitation switch (an AO3401 on a SOT-23-to-DIP adapter), filters and both jacks are wired to the same perfboard. The SDA, SCL and 3.3 V wires run from jack 1 through the ADS1115 to jack 2.
 
 ### How the thermistor is read
 
-From `ads1115-dev/DESIGN.md`:
+Based on `ads1115-dev/DESIGN.md`, changed here to a switched excitation with no A0 divider:
 
-- Ratiometric reading with pulsed excitation: GPIO25 drives the divider from about 20 ms before the first conversion until the last one ends (see FIRMWARE.md, Table 1).
-- A0 reads half the excitation voltage and A1 reads the divider tap. The thermistor value comes from the ratio A1 ÷ (2 × A0), so ADC reference and supply errors cancel.
-- A0 reads through a divider of two equal 10k resistors (0.1%, the same part as the divider's 10k) because GPIO25's high level is the ESP32 board's own 3.3 V, which moves with the ESP32's load and can sit above the ADS1115's supply (the separate 3.3 V bus). At half the excitation, A0 always stays well inside the ADS1115's input range.
-- Inputs are single-ended, with the same gain setting on every input. One chip takes the excitation monitor plus up to 3 thermistors.
+- Ratiometric reading with pulsed excitation: an AO3401 P-channel MOSFET switches the ADS1115's own 3.3 V wire onto the energize node. GPIO25 drives its gate, low = on, from about 20 ms before the first conversion until the last one ends (see FIRMWARE.md, Table 1). The excitation is off between readings, so the thermistor doesn't self-heat (see Thermistor).
+- A0 reads the excitation (the energize node) and A1 reads the divider tap. The thermistor value comes from the ratio A1 ÷ A0, so ADC reference and supply errors cancel. A0 is needed because the ADS1115 measures against its internal reference, not VDD.
+- A0 connects straight to the energize node, with no divider. The excitation comes from the ADS1115's own 3.3 V through the switch, so it can't exceed VDD and A0 stays inside the input range. The earlier design drove the divider from GPIO25, whose high level can sit above VDD, so A0 needed a 2 × 10k divider; dropping it removes that divider's ratio error (about 0.05 °C at 25 °C and 0.18 °C at −20 °C with 0.1% parts).
+- A 100k pull-up from the gate to the 3.3 V wire holds the switch off while GPIO25 floats during boot and reset. GPIO25's high level (the ESP32's 3.3 V) has to stay within about 0.4 V of the 3.3 V bus, or the switch doesn't turn fully off. Check both rails on the bench.
+- Until the AO3401 is fitted, a PNP (2N3906 or BC557) does the same job: emitter to the 3.3 V wire, collector to the energize node, base through 4.7k to CAT5 #1 pin 7, and 47k from base to emitter. It drops about 0.1 V, which A0 measures, so it doesn't affect the reading.
+- Inputs are single-ended, with the same gain setting (±4.096 V) on every input: A0 sits at about 3.3 V and A1 reaches about 3.0 V at −20 °C. One chip takes the excitation monitor plus up to 3 thermistors.
 
 ```
-GPIO25 energize ──┬── 10k ───┬── A0   (100 nF from the A0 pin to the ground point)
- (CAT5 #1 blue)   │          │
-                  │          └── 10k ── ground point
-                  │
-                  └── 10k ───┬── tap ── 1 kΩ ──┬── A1   (100 nF from the A1 pin to the ground point)
-                             │
-                             └── CAT5 #2 blue ── thermistor ── CAT5 #2 blue-striped ── ground point
+3.3 V wire (ADS1115 VDD)
+    │
+    ├── 100k ──┐
+    │          │
+    S          │
+  AO3401 G ────┴──── GPIO25 (CAT5 #1 blue), low = on
+    D
+    │
+energize ──┬──────────────────── A0   (100 nF from the A0 pin to the ground point)
+  node     │
+           └── 10k ───┬── tap ── 1 kΩ ──┬── A1   (100 nF from the A1 pin to the ground point)
+                      │
+                      └── CAT5 #2 blue ── thermistor ── CAT5 #2 blue-striped ── ground point
 ```
 
 ### ADS1115 board pins
@@ -300,7 +308,7 @@ Pin names are typical for the Lonely Binary board and not verified against it. R
 | SDA | SDA wire | orange | |
 | ADDR | not connected | | pulled low on the board, which gives 0x48 |
 | ALRT | not connected | | |
-| A0 | midpoint of the A0 divider (10k from the energize node, 10k to the ground point), 100 nF to the ground point | none (component leads) | excitation monitor, reads half the excitation |
+| A0 | energize node (directly), 100 nF to the ground point | none (component leads) | excitation monitor, reads the excitation |
 | A1 | 1 kΩ from the tap node, 100 nF to the ground point | none (component leads) | thermistor voltage |
 | A2, A3 | not connected | | spare, for more thermistors |
 
@@ -310,21 +318,22 @@ Pin names are typical for the Lonely Binary board and not verified against it. R
 
 | Part | From | To | Wire color |
 |---|---|---|---|
+| AO3401 P-channel MOSFET, on a SOT-23-to-DIP adapter | source: 3.3 V wire; drain: energize node | gate: CAT5 #1 pin 7 | |
+| 100k resistor (5% is fine), gate pull-up | 3.3 V wire | AO3401 gate | |
 | 10k resistor (0.1%, ≤15 ppm/°C) | energize node | tap node | |
-| 10k resistor (0.1%, ≤15 ppm/°C), A0 divider top | energize node | A0 | |
-| 10k resistor (0.1%, ≤15 ppm/°C), A0 divider bottom | A0 | ground point | |
 | 1 kΩ (1% is fine) | tap node | A1 | |
+| Wire or short jumper | energize node | A0 | |
 | 100 nF | A0 | ground point | |
 | 100 nF | A1 | ground point | |
-| CAT5 #1 wire, pin 7 (jack 1 terminal 7) | jack 1 | energize node | blue |
+| CAT5 #1 wire, pin 7 (jack 1 terminal 7) | jack 1 | AO3401 gate | blue |
 | CAT5 #2 wire, pin 7 (jack 2 pin 7) | jack 2 | tap node | blue |
 | CAT5 #2 wire, pin 8 (thermistor return) | jack 2 | ground point | blue-striped |
 | ADS1115 GND wire | ADS1115 GND | ground point | black |
 
 - The 10k's tolerance now counts as well as its stability, because the thermistor is not calibrated (0.1% is about 0.02 °C).
 - The A0 divider's ratio enters the result directly, so its two resistors need the same precision. Two 0.1% parts keep the ratio within about 0.1%, which is about 0.05 °C at 25 °C, 0.08 °C at 0 °C and 0.18 °C at −20 °C. Matched parts, or measuring the ratio once on the bench, would do better.
-- The divider draws about 0.17 mA from GPIO25 while the excitation is on.
-- A0 sits at 5 kΩ, so the ADC input loading lowers it by about 0.1%. Firmware corrects it the same way as A1's loading (see Thermistor), using the same input-impedance figure.
+- The divider draws about 0.17 mA from the 3.3 V wire while the excitation is on at 25 °C, less in the cold. GPIO25 drives only the gate.
+- The switch drives A0 at well under an ohm, so ADC input loading doesn't affect it and needs no correction.
 - `DESIGN.md` assumes the board has no input filters of its own. Check yours, since onboard parts would add to these.
 
 ### Ground point
@@ -430,7 +439,7 @@ Each breakout adds its own pull-ups, so check the idle levels on the scan after 
 - **Sensor hood:** bowl or jar, vents, the silicone seal and the hanger are proposed, not built.
 - **ADS1115 board:** read the pin names off the board, and check whether it has its own series resistors or capacitors on A0 to A3.
 - **SHT45 pin order:** read it off the Adafruit 6174 before soldering.
-- **Firmware for GPIO25:** no code drives the energize lead yet.
+- **Firmware for GPIO25:** no code drives the switch yet. The logic is inverted: drive GPIO25 low to energize, high otherwise.
 - **Merging the boxes:** decided by the bench noise test in "Why the ADS1115 box is separate".
 
 ## Conditions to monitor
@@ -480,7 +489,7 @@ A thin water film from fog or condensation can carry a small current between any
 |---|---|---|---|
 | Thermistor leads, joints and pads (sensor end) | The two leads, across the thermistor | Parallel resistance lowers the NTC's resistance, so the reading is warmer. About R/R_leak: at 25 °C (10 kΩ, −4.4 %/°C) 1 MΩ gives 1% and +0.23 °C and 10 MΩ gives +0.02 °C; at 0 °C (about 33 kΩ) 1 MΩ gives 3% and about +0.6 °C; at −20 °C (about 97 kΩ) 1 MΩ gives 9% and about +1.6 °C. A dirty film of 100 kΩ gives about +2.2 °C even at 25 °C | Silent: the reading stays smooth and plausible |
 | Divider tap (CAT5 #2 pin 7, jack 2, and in the ADS1115 box the 1 kΩ, the 100 nF and the A1 pin) | The tap and a neighbor: GND or the thermistor return (warmer); 3.3 V, SDA, SCL or the energize node (colder) | A leak to GND or the thermistor return is the same as a leak across the thermistor (row above). A leak to a neighbor at a high voltage shifts the reading by about −0.2 °C per 1 MΩ at any temperature from −20 to 40 °C, so in the cold it is smaller than a GND leak (−0.19 °C against +0.63 °C at 0 °C). At jack 2, pin 7's only neighbors are pins 6 and 8, both ground, so a leak there reads warmer | Silent |
-| Energize node and lead (GPIO25, CAT5 #1 pin 7) | GND or a neighbor | A0 reads the energize node through its divider, so a steady leak cancels in the ratio, as long as the leak current stays within what the GPIO can drive. A leak at A0 itself is different: A0 sits at 5 kΩ, so a 1 MΩ leak to GND lowers it by 0.5% and the reading goes colder by about 0.2 °C at 25 °C, as sensitive as the tap | Silent at A0, otherwise mostly invisible |
+| Energize node (ADS1115 box) and switch lead (GPIO25, CAT5 #1 pin 7) | GND or a neighbor | A0 reads the energize node directly and the switch holds it firmly, so a steady leak there, or at A0, cancels in the ratio. A leak on the switch lead is harmless: GPIO25 drives it, and during boot the 100k pull-up holds the switch off against a leak to GND of about 1 MΩ or more | Mostly invisible |
 | SDA and SCL (everywhere) | GND, 3.3 V or each other | The breakout boards' pull-ups hold the lines firmly, so only a strong leak disturbs the bus | Loud: missing 0x44 or 0x48 in the scan, `idle levels ... LOW`, or read errors in `sensor-probe` |
 | 3.3 V to GND | The supply and ground wires | Only a few µA at 1 MΩ; harmless unless it drops to about 1 kΩ | Rarely seen |
 | DS3231 backup battery contacts (warm box) | The cell to GND | A steady drain on a cell that supplies about 1 µA, so it shortens the battery's life | Clock resets, or the oscillator-stop flag is set, after a power-off |
@@ -489,7 +498,7 @@ A thin water film from fog or condensation can carry a small current between any
 - **The silent rows are the real risk.** I2C and supply faults announce themselves; a thermistor leak just moves the temperature. A clean film at room temperature moves it by tenths of a degree; a dirty film, or the same film in cold weather, moves it by degrees. The thermistor circuit is the most sensitive node, from the thermistor pads at the sensor end to A0 and A1 in the ADS1115 box, so all of it needs the best protection.
 - **The warm box is warmer than the air and vented, so its films dry sooner.** The ADS1115 box dissipates only about a milliwatt, so it sits at air temperature and its films dry no sooner than the sensor end's. Fog reaches the screw terminals, jack contacts and perfboard in both boxes through the vents and the cable holes.
 - **Cable runs:** the conductors are inside an insulating jacket, so the cable itself is safe while the jacket is whole. Water can wick into the cut end and run down the jacket, so seal the ends and keep the drip loops.
-- **Decided: conformal coating on the thermistor circuit only.** At the sensor end that is the thermistor's leads, joints and pads. In the ADS1115 box it is the divider and filter parts and the ADS1115's header pins; the ADS1115 board itself is not coated. Mask the connectors and jacks, and keep the coating off the SHT45 (see Contact protection). The I2C wiring is not coated: its faults show up in the scan. Spacing the tap and A0 pads away from 3.3 V, SDA, SCL and GND adds margin (a GND guard trace beside them is not recommended: a leak to it reads warmer, which is the larger error in the cold).
+- **Decided: conformal coating on the thermistor circuit only.** At the sensor end that is the thermistor's leads, joints and pads. In the ADS1115 box it is the divider and filter parts, the AO3401 and its pull-up, and the ADS1115's header pins; the ADS1115 board itself is not coated. Mask the connectors and jacks, and keep the coating off the SHT45 (see Contact protection). The I2C wiring is not coated: its faults show up in the scan. Spacing the tap pads away from 3.3 V, SDA, SCL and GND adds margin (a GND guard trace beside them is not recommended: a leak to it reads warmer, which is the larger error in the cold).
 - **No test yet.** The scan sees only the loud faults. A leak on the thermistor can be seen only by comparing it with the SHT45 in fog.
 
 ### Contact protection

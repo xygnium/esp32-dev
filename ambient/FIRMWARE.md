@@ -2,7 +2,7 @@
 
 Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py`). It has no ADS1115 code yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
 
-The reading scheme (ratiometric, pulsed excitation on GPIO25, A0 for half the excitation, through a divider, and A1 for the tap) is in [How the thermistor is read](WIRING.md#how-the-thermistor-is-read).
+The reading scheme (ratiometric, pulsed excitation on GPIO25, A0 for the excitation and A1 for the tap) is in [How the thermistor is read](WIRING.md#how-the-thermistor-is-read).
 
 ## Where the noise comes from
 
@@ -24,7 +24,7 @@ The firmware can't time conversions around WiFi activity: beacon wakes and delay
 | Mode | Single-shot | The firmware chooses when each conversion runs |
 | Readings | One set per reading: A0, A1, A0 | The excitation is on for about 0.4 s at 8 SPS, which heats the thermistor about 0.006 °C. Sets back to back keep heating it (about 0.03 °C for five), so if more readings are ever wanted, space the sets about 15 s apart |
 | Order | Energize, wait, convert A0, A1, A0, de-energize, publish | |
-| Excitation | GPIO25 high from about 20 ms before the first conversion until the last conversion ends | The inputs climb to their final voltage through the filters: A1 takes about 7 ms at 25 °C and 11 ms at −20 °C to settle within one ADC step, and A0, behind its 5 kΩ divider, takes about 6 ms. A conversion started at switch-on averages the climb in. With the A0, A1, A0 order only the first A0 is affected, and it is averaged with the second, so without the wait the error would be about −0.09 °C at 25 °C and −0.35 °C at −20 °C. If A1 were converted first, it would be +0.2 °C and +1.4 °C. The wait costs nothing and removes both. The 20 ms figure is from `ads1115-dev/DESIGN.md`, still to be confirmed on the bench |
+| Excitation | GPIO25 low (switch on) from about 20 ms before the first conversion until the last conversion ends | The inputs climb to their final voltage through the filters: A1 takes about 7 ms at 25 °C and 11 ms at −20 °C to settle within one ADC step. A0 is driven directly by the switch and settles in microseconds. A conversion started at switch-on averages the climb in, so if A1 were converted first the error would be about +0.2 °C at 25 °C and +1.4 °C at −20 °C. With the A0, A1, A0 order A1 starts long after it has settled, so the wait is a margin that costs nothing. The 20 ms figure is from `ads1115-dev/DESIGN.md`, still to be confirmed on the bench |
 
 ## WiFi power
 
@@ -37,5 +37,5 @@ The firmware can't time conversions around WiFi activity: beacon wakes and delay
 
 ## Open items
 
-- **Write the ADS1115 code** to Table 1. Multiply A0 by 2 (it reads half the excitation), and read A0, A1, A0 and average the two A0 readings, so the ratio holds even if the excitation moves between readings. Then run the noise test in WIRING.md (build step 3) with WiFi idle and with WiFi plus SD writes.
+- **Write the ADS1115 code** to Table 1. Read A0, A1, A0 and average the two A0 readings, so the ratio holds even if the excitation moves between readings. Then run the noise test in WIRING.md (build step 3) with WiFi idle and with WiFi plus SD writes.
 - **Keepalive:** if the firmware ever moves from UDP status lines to MQTT, set the keepalive longer than any quiet period. The broker drops a session after 1.5 times the keepalive with no traffic.

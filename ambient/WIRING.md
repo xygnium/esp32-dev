@@ -320,7 +320,7 @@ Pin names are typical for the Lonely Binary board and not verified against it. R
 |---|---|---|---|
 | AO3401 P-channel MOSFET, on a SOT-23-to-DIP adapter | source: 3.3 V wire; drain: energize node | gate: CAT5 #1 pin 7 | |
 | 100k resistor (5% is fine), gate pull-up | 3.3 V wire | AO3401 gate | |
-| 10k resistor (0.1%, ≤15 ppm/°C) | energize node | tap node | |
+| 10k resistor (0.25%, 15 ppm/°C; the part on hand will be used, see note below) | energize node | tap node | |
 | 1 kΩ (1% is fine) | tap node | A1 | |
 | Wire or short jumper | energize node | A0 | |
 | 100 nF | A0 | ground point | |
@@ -330,7 +330,7 @@ Pin names are typical for the Lonely Binary board and not verified against it. R
 | CAT5 #2 wire, pin 8 (thermistor return) | jack 2 | ground point | blue-striped |
 | ADS1115 GND wire | ADS1115 GND | ground point | black |
 
-- The 10k's tolerance now counts as well as its stability, because the thermistor is not calibrated (0.1% is about 0.02 °C).
+- The 10k's tolerance now counts as well as its stability, because the thermistor is not calibrated. The design called for 0.1% (about 0.02 °C at 25 °C). The 0.25% part on hand will be used (about 0.06 °C at 25 °C): that is small against the thermistor's ±0.5 °C. The 15 ppm/°C is unchanged.
 - The A0 divider's ratio enters the result directly, so its two resistors need the same precision. Two 0.1% parts keep the ratio within about 0.1%, which is about 0.05 °C at 25 °C, 0.08 °C at 0 °C and 0.18 °C at −20 °C. Matched parts, or measuring the ratio once on the bench, would do better.
 - The divider draws about 0.17 mA from the 3.3 V wire while the excitation is on at 25 °C, less in the cold. GPIO25 drives only the gate.
 - The switch drives A0 at well under an ohm, so ADC input loading doesn't affect it and needs no correction.

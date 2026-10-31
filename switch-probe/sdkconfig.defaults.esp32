@@ -1,0 +1,2 @@
+# Matches the 40 MHz crystal on the ESP-WROOM-32 module. Recheck if the board changes.
+CONFIG_XTAL_FREQ_40=y

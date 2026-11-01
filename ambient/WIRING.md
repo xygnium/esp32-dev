@@ -279,13 +279,15 @@ Based on `ads1115-dev/DESIGN.md`, changed here to a switched excitation with no 
 - Inputs are single-ended, with the same gain setting (±4.096 V) on every input: A0 sits at about 3.3 V and A1 reaches about 3.0 V at −20 °C. One chip takes the excitation monitor plus up to 3 thermistors.
 
 ```
-3.3 V wire (ADS1115 VDD)
+3.3 V wire (from CAT5 #1 green, jack 1 pin 1; also feeds ADS1115 VDD and jack 2 pin 1)
     │
-    ├── 100k ──┐
-    │          │
-    S          │
-  AO3401 G ────┴──── GPIO25 (CAT5 #1 blue), low = on
-    D
+    ├── 100k ──────────┐
+    │                  │
+    S (pin 2)          │
+    │                  │
+  AO3401 ── G (pin 1) ─┴──── GPIO25 (CAT5 #1 blue), low = on
+    │
+    D (pin 3)
     │
 energize ──┬──────────────────── A0   (100 nF from the A0 pin to the ground point)
   node     │

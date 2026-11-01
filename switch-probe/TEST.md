@@ -88,7 +88,7 @@ AO3401 ── G (pin 1) ─┴── GPIO17 (TX2)
  GND ─── meter −
 ```
 
-The design uses GPIO25, but the breadboard has no free socket on that side of the ESP32. Any output pin behaves the same for this test, so `PIN_SWITCH` in `main/main.c` is set to GPIO17.
+The design uses GPIO25, but the breadboard has no free socket on that side of the ESP32. Any output pin behaves the same for this test, so `PIN_SWITCH` in `main/main.c` was set to GPIO17 for these results. It is now back on GPIO25, so set it to `GPIO_NUM_17` to repeat them on the breadboard.
 
 In this directory, run `./build.sh`, `./flash.sh` (port `/dev/ttyUSB0`) and `./monitor.sh`. The monitor resets the board when it opens. The firmware alternates high and low every 10 s and prints the state and the expected reading. It has no PASS or FAIL, because the ESP32 can't see the drain: the meter decides.
 
@@ -103,5 +103,4 @@ In this directory, run `./build.sh`, `./flash.sh` (port `/dev/ttyUSB0`) and `./m
 ## Open items
 
 - **Perfboard rails:** on the perfboard, GPIO25's high level comes from the ESP32's 3.3 V, while the AO3401's source is on the regulator's 3.3 V bus. If the two differ by more than about 0.4 V, the switch doesn't turn fully off. Test 12 reads only 1.4 mV, so the gate and source appear to share a rail here, which says nothing about the perfboard. Measure between the ESP32's 3V3 pin and the 3.3 V bus on the perfboard. No firmware is needed.
-- **GPIO25:** set `PIN_SWITCH` back to `GPIO_NUM_25` to run this probe on the perfboard.
 - **Boot resets:** one scripted capture of the console logged 25 power-on resets before the app started, and another read got no output. A capture with the serial reset lines released showed one normal boot. The capture method is the likely cause, but this wasn't proved.

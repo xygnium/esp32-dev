@@ -1,8 +1,8 @@
 // Thermistor switch probe, kept as a permanent diagnostic. Repeats until reset.
 // The switch pin drives the AO3401 gate, low = on. The 100k pull-up holds the
 //   switch off while the pin floats during boot and reset.
-// PIN_SWITCH is GPIO17 (TX2) for the breadboard, which has no free socket beside
-//   D25. The perfboard uses GPIO25: change PIN_SWITCH to test there.
+// PIN_SWITCH is GPIO25, as on the perfboard. The breadboard test used GPIO17 (TX2),
+//   because that board has no free socket beside D25.
 // Holds each state for HOLD_MS so it can be measured with a meter:
 //   - on: pin low, drain at about 3.3 V,
 //   - off: pin high, drain at about 0 V. Also measure the gate against the
@@ -15,7 +15,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
-#define PIN_SWITCH  GPIO_NUM_17
+#define PIN_SWITCH  GPIO_NUM_25
 #define HOLD_MS     10000
 
 void app_main(void)

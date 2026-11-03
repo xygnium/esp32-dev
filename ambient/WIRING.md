@@ -274,7 +274,7 @@ Based on `ads1115-dev/DESIGN.md`, changed here to a switched excitation with no 
 - Ratiometric reading with pulsed excitation: an AO3401 P-channel MOSFET switches the ADS1115's own 3.3 V wire onto the energize node. GPIO25 drives its gate, low = on, from about 20 ms before the first conversion until the last one ends (see FIRMWARE.md, Table 1). The excitation is off between readings, so the thermistor doesn't self-heat (see Thermistor).
 - A0 reads the excitation (the energize node) and A1 reads the divider tap. The thermistor value comes from the ratio A1 ÷ A0, so ADC reference and supply errors cancel. A0 is needed because the ADS1115 measures against its internal reference, not VDD.
 - A0 connects straight to the energize node, with no divider. The excitation comes from the ADS1115's own 3.3 V through the switch, so it can't exceed VDD and A0 stays inside the input range. The earlier design drove the divider from GPIO25, whose high level can sit above VDD, so A0 needed a 2 × 10k divider; dropping it removes that divider's ratio error (about 0.05 °C at 25 °C and 0.18 °C at −20 °C with 0.1% parts).
-- A 100k pull-up from the gate to the 3.3 V wire holds the switch off while GPIO25 floats during boot and reset. GPIO25's high level (the ESP32's 3.3 V) has to stay within about 0.4 V of the 3.3 V bus, or the switch doesn't turn fully off. Check both rails on the bench.
+- A 100k pull-up from the gate to the 3.3 V wire holds the switch off while GPIO25 floats during boot and reset. GPIO25's high level (the ESP32's 3.3 V) has to stay within about 0.4 V of the 3.3 V bus, or the switch doesn't turn fully off. The excitation, A0 and VDD are all on the regulated 3.3 V wire, so this can't affect the ratio or the input range, only self-heating. `switch-probe` shows it directly: with GPIO25 high, the energize node reads about 0 V, so the rails need no separate check.
 - Why the AO3401: it is P-channel, so it switches the high side and the thermistor keeps its direct ground return. Its gate threshold is low (about −1 V), so a 3.3 V GPIO turns it fully on. Its on-resistance is well under an ohm, which suits driving A0 directly, and it is a common, cheap part. The bench test in [switch-probe/TEST.md](../switch-probe/TEST.md) confirms it works with 3.3 V drive.
 - Inputs are single-ended, with the same gain setting (±4.096 V) on every input: A0 sits at about 3.3 V and A1 reaches about 3.0 V at −20 °C. One chip takes the excitation monitor plus up to 3 thermistors.
 
@@ -414,10 +414,25 @@ Each check is a small diagnostic project beside `ambient` in `esp32-dev`. In its
 | `sensor-probe` | The BMP388 and SHT45 deliver readings: chip id (a BMP390 is also accepted), SHT45 checksums, and temperature, pressure and humidity inside each part's operating range. Prints a `PASS` or `FAIL` per sensor and the BMP388 minus SHT45 temperature difference. Repeats until reset. | `PASS` for both, with plausible values. Accuracy needs a reference thermometer, barometer or hygrometer. |
 | `rtc-probe` | The DS3231: valid time, oscillator-stop flag clear, seconds advancing, chip temperature. | `PASS`. Set the clock once first (`SET_FROM_BUILD` 1, flash, then back to 0 and reflash). The clock is kept in UTC. |
 | `sd-probe` | The SD card: mounts it (never formats), writes, reads back and deletes a file, reports size and free space. | `PASS`. A `gpio: conflict found for GPIO[4]` warning after the unmount is harmless. |
+| `ads1115-probe` | The thermistor channel: A0 with the switch off, then the A0, A1, A0 set, the ratio, the resistance and the temperature, with the spread of the last 32 readings. Alternates idle and load phases of 32 readings, the load being active WiFi scans plus continuous SD writes, and prints a `PHASE` summary after each. Repeats until reset. | `PASS` on every line, with a plausible resistance and temperature. The `PHASE` lines are the noise figures for build step 3: the idle and load spreads should match. |
 
 Further wiring is suspended until `sensor-probe` confirms the BMP388 and SHT45 readings. First run (pass 3 to 6, CAT5 #1 and #2 in use): BMP388 24.95 C and 1021.4 hPa, SHT45 24.33 C and 44.3 %RH, both `PASS`, BMP388 about 0.6 C above the SHT45. That is expected: the BMP388's temperature is the warm box's temperature, not the air's, so it isn't meant to match the SHT45. The BMP388 is there for pressure. Not yet compared with a reference instrument.
 
 Results so far: `i2c-scan` (pass 11) shows all five bus 0 addresses, with CAT5 #1 and #2 in use (0x44, 0x48, 0x57, 0x68, 0x76), with the SHT4x serial number 0x16440c7f and BMP388 chip id 0x50, idle levels high on both buses and nothing on bus 1 (earlier, with nothing connected, it showed only 0x57, 0x68 and 0x76); `rtc-probe` passed, including a power-off test on the backup battery; `sd-probe` passed with a 120 MB card at 4 MHz.
+
+`ads1115-probe` first run (2026-11-02, thermistor connected, so not the fixed-resistor baseline of build step 3; 24 passes, all `PASS`, WiFi and SD idle): A0 0.0018 V with the switch off and 3.3090 V with it on, A1 1.6493 to 1.6501 V, 9959.8 to 9970.3 Ω, 25.07 to 25.09 °C, with a spread of 0.007 °C (sd) and 0.024 °C (min-to-max). The thermistor was close to the ESP32 for this run. Moved away from it and compared with the SHT45 the same day, one firmware after the other about a minute apart: thermistor falling from 25.23 to 25.17 °C, then SHT45 25.18 to 25.14 °C, then thermistor 25.11 to 25.04 °C. The SHT45 falls within the thermistor's trend, so they agree to about 0.1 °C, at one temperature only.
+
+Fixed-resistor baseline (build step 3, 2026-11-02): a 10k 0.25% resistor in the thermistor's terminal block at the sensor end, all `PASS`, 100 passes, 10007.4 to 10011.5 Ω. One ADC step is about 0.0035 °C here. The load was 32 WiFi scans and 545 SD writes per phase. Scans transmit less than a sustained data stream, so this isn't the worst case.
+
+**Table 19a: Fixed-resistor noise, apparent temperature**
+
+| Phase | Mean | sd | Min-to-max |
+|---|---|---|---|
+| Idle | 24.9776 °C | 0.0004 °C | 0.0026 °C |
+| WiFi plus SD load | 24.9778 °C | 0.0021 °C | 0.0078 °C |
+| Idle | 24.9783 °C | 0.0010 °C | 0.0043 °C |
+
+The load about doubles the spread, but it stays under 0.01 °C and the mean doesn't move. A0 ranges from 3.3086 to 3.3098 V under load and the ratio cancels most of that. A run with WiFi scans alone showed no change in spread, so the increase comes from the SD writes or from both together.
 
 ### Build order for the rest
 
@@ -425,8 +440,8 @@ Each step adds one unknown, and the scan checks it:
 
 1. CAT5 #1 and the ADS1115: expect 0x48. Done (scan pass 11).
 2. CAT5 #2 and the SHT45: expect 0x44 and a serial number. Done (scan pass 11).
-3. A fixed precision resistor in place of the thermistor: check the noise. This is the baseline for later.
-4. The thermistor, with its leads and joints sealed.
+3. A fixed precision resistor in place of the thermistor: check the noise. This is the baseline for later. Done (Table 19a).
+4. The thermistor, with its leads and joints sealed. Thermistor tested; sealing still to do.
 
 Each breakout adds its own pull-ups, so check the idle levels on the scan after each step.
 
@@ -441,8 +456,8 @@ Each breakout adds its own pull-ups, so check the idle levels on the scan after 
 - **Sensor hood:** bowl or jar, vents, the silicone seal and the hanger are proposed, not built.
 - **ADS1115 board:** read the pin names off the board, and check whether it has its own series resistors or capacitors on A0 to A3.
 - **SHT45 pin order:** read it off the Adafruit 6174 before soldering.
-- **Firmware for GPIO25:** no code drives the switch yet. The logic is inverted: drive GPIO25 low to energize, high otherwise.
-- **Merging the boxes:** decided by the bench noise test in "Why the ADS1115 box is separate".
+- **Firmware for GPIO25:** only `switch-probe` and `ads1115-probe` drive the switch, `ambient` doesn't yet. The logic is inverted: drive GPIO25 low to energize, high otherwise.
+- **Merging the boxes:** the bench noise test in "Why the ADS1115 box is separate" did show a wider spread under load (Table 19a), so its condition for merging isn't met. The increase is small, and it is well below the thermistor's tolerance, so the boxes can stay separate as built.
 
 ## Conditions to monitor
 

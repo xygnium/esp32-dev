@@ -2,7 +2,7 @@
 
 Bench test of the thermistor excitation switch, an AO3401 P-channel MOSFET on a SOT-23-to-DIP adapter, before wiring it into the ADS1115 box. The circuit it goes into is in [../ambient/WIRING.md](../ambient/WIRING.md).
 
-Tested 2026-10-31 on the breadboard. All tests passed. One check is still open: see [Open items](#open-items).
+Tested 2026-10-31 on the breadboard. All tests passed. The check on the perfboard also passed: see [Perfboard test](#perfboard-test). One item is still open: see [Open items](#open-items).
 
 ## Pinout
 
@@ -100,7 +100,16 @@ In this directory, run `./build.sh`, `./flash.sh` (port `/dev/ttyUSB0`) and `./m
 | 12 | high | pin 1 to pin 2 | under 0.4 V | 0.0014 V |
 | 13 | low | pin 3 to GND | about 3.3 V | 3.3 V |
 
+## Perfboard test
+
+On the perfboard, GPIO25's high level comes from the ESP32's 3.3 V, while the AO3401's source is on the regulator's 3.3 V bus. If the two differ by more than about 0.4 V, the switch doesn't turn fully off. Test 12 reads only 1.4 mV because the gate and source appear to share a rail on the breadboard, which says nothing about the perfboard. A reading of about 0 V on the energize node with GPIO25 high shows the switch is off, so the rails need no separate measurement.
+
+**Table 5: Perfboard result**
+
+| Test | GPIO25 | Measure | Expected | Result |
+|---|---|---|---|---|
+| 14 | high | energize node to GND | about 0 V | pass (value not recorded) |
+
 ## Open items
 
-- **Perfboard rails:** on the perfboard, GPIO25's high level comes from the ESP32's 3.3 V, while the AO3401's source is on the regulator's 3.3 V bus. If the two differ by more than about 0.4 V, the switch doesn't turn fully off. Test 12 reads only 1.4 mV, so the gate and source appear to share a rail here, which says nothing about the perfboard. Measure between the ESP32's 3V3 pin and the 3.3 V bus on the perfboard. No firmware is needed.
-- **Boot resets:** one scripted capture of the console logged 25 power-on resets before the app started, and another read got no output. A capture with the serial reset lines released showed one normal boot. The capture method is the likely cause, but this wasn't proved.
+- **Boot resets:** one scripted capture of the console logged 25 power-on resets before the app started, and another read got no output. A capture with the serial reset lines released showed one normal boot. The capture method is the likely cause, but this wasn't proved. On 2026-11-02 an `ads1115-probe` capture on the perfboard, also with the lines released, logged 54 ROM boot banners cut off mid-line before one normal boot, and the first flash that day failed with `No serial data received` (the retry worked). Two more captures that day showed the same with `sensor-probe` (44 banners) and `ads1115-probe` (50), and both flashes worked first time. So it isn't specific to one firmware, and releasing the lines doesn't rule it out. After a USB power cycle the same day, a capture showed one clean boot with `ads1115-probe`, so power state may matter. That is one capture, and the cause is still unknown.

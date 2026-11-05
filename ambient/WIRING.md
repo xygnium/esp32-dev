@@ -424,6 +424,8 @@ Results so far: `i2c-scan` (pass 11) shows all five bus 0 addresses, with CAT5 #
 
 Fixed-resistor baseline (build step 3, 2026-11-02): a 10k 0.25% resistor in the thermistor's terminal block at the sensor end, all `PASS`, 100 passes, 10007.4 to 10011.5 Ω. One ADC step is about 0.0035 °C here. The load was 32 WiFi scans and 545 SD writes per phase. Scans transmit less than a sustained data stream, so this isn't the worst case.
 
+These results also settle two earlier pre-soldering checks. The ADS1115 inputs are wired right, and any series parts on the breakout cause no measurable error: the 10k reads inside its ±25 Ω tolerance. The SHT45 pin order is right: it answers at 0x44 with good checksums and plausible readings.
+
 **Table 19a: Fixed-resistor noise, apparent temperature**
 
 | Phase | Mean | sd | Min-to-max |
@@ -453,8 +455,6 @@ Each breakout adds its own pull-ups, so check the idle levels on the scan after 
 ## Open items
 
 - **Mounting heights:** the ADS1115 box and the sensor hood are built; the heights aren't recorded here.
-- **ADS1115 board:** read the pin names off the board, and check whether it has its own series resistors or capacitors on A0 to A3.
-- **SHT45 pin order:** read it off the Adafruit 6174 before soldering.
 - **Firmware for GPIO25:** only `switch-probe` and `ads1115-probe` drive the switch, `ambient` doesn't yet. The logic is inverted: drive GPIO25 low to energize, high otherwise.
 - **Merging the boxes:** the bench noise test in "Why the ADS1115 box is separate" did show a wider spread under load (Table 19a), so its condition for merging isn't met. The increase is small, and it is well below the thermistor's tolerance, so the boxes can stay separate as built.
 

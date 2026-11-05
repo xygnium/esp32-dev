@@ -5,11 +5,15 @@
 // Each pass:
 //   - reads A0 with the switch off, to show the switch really is off,
 //   - energizes, waits, converts A0, A1, A0, and de-energizes,
-//   - works out the ratio A1 / A0, the resistance and the temperature.
+//   - works out the ratio A1 / A0, the resistance and the temperature,
+//   - reads the SHT45 (0x44) straight after, and prints the thermistor minus
+//     SHT45 temperature difference.
 // PASS means the conversions finished and the voltages are sensible for this
 //   circuit: A0 near 0 V when off and near 3.3 V when on, steady across the
 //   reading, and a ratio that isn't an open or a short.
 // It can't say the temperature is accurate; compare it with a reference.
+// The SHT45 has its own PASS or FAIL (reads and checksums good, values inside its
+//   operating range, as in sensor-probe) and doesn't affect the thermistor's.
 // Noise test: the readings alternate between idle and load phases of SPREAD_SETS
 //   good readings, starting idle, with a summary line after each. Idle has the
 //   radio stopped and the SD card quiet. Load runs active WiFi scans, which
@@ -18,9 +22,9 @@
 //   data stream, so this is not the worst case.
 // With a fixed resistor in place of the thermistor (build step 3) the
 //   temperature is only an apparent one, but its spread is the noise figure.
-// READ_PERIOD_MS keeps the excitation on about 20 % of the time, which is
-//   about 0.03 C of self-heating, more than the logger's 15 s spacing. That
-//   doesn't matter for a diagnostic or for a fixed resistor.
+// The excitation is on for about 0.42 s a pass. At READ_PERIOD_MS = 30 s that is
+//   about 1.4 % of the time, well under 0.01 C of self-heating. (At the logger's
+//   15 s spacing it is about 3 %; at 2 s it was about 16 %, roughly 0.03 C.)
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -45,7 +49,7 @@
 #define SCL_PIN         22
 #define SCL_HZ          100000
 #define IO_TIMEOUT_MS   50
-#define READ_PERIOD_MS  2000
+#define READ_PERIOD_MS  30000
 #define PIN_SWITCH      GPIO_NUM_25
 
 #define ADS_ADDR        0x48
@@ -85,6 +89,12 @@
 //   an open or a short.
 #define RATIO_MIN       0.02
 #define RATIO_MAX       0.98
+
+#define SHT4X_ADDR      0x44
+#define SHT4X_CMD_MEASURE_HIGH 0xFD
+// Two ticks at the 100 Hz tick rate; the high-precision measurement takes
+//   up to 8.3 ms.
+#define SHT4X_WAIT_MS   20
 
 #define SPREAD_SETS     32
 
@@ -180,6 +190,52 @@ static double steinhart_hart_c(double r)
 {
     double l = log(r);
     return 1.0 / (SH_A + SH_B * l + SH_C * l * l * l) - 273.15;
+}
+
+// CRC-8 of one 16-bit word as the SHT4x sends it: polynomial 0x31, start 0xFF.
+static uint8_t sht4x_crc(const uint8_t *word)
+{
+    uint8_t crc = 0xFF;
+
+    for (int i = 0; i < 2; i++) {
+        crc ^= word[i];
+        for (int bit = 0; bit < 8; bit++) {
+            crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 0x31) : (uint8_t)(crc << 1);
+        }
+    }
+    return crc;
+}
+
+// Reads the SHT45 and prints its line, as in sensor-probe. Returns true and the
+//   temperature if the reading passed.
+static bool sht45_read(i2c_master_dev_handle_t dev, double *temp_c)
+{
+    const uint8_t cmd = SHT4X_CMD_MEASURE_HIGH;
+    uint8_t b[6];
+
+    esp_err_t err = i2c_master_transmit(dev, &cmd, 1, IO_TIMEOUT_MS);
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(SHT4X_WAIT_MS));
+        err = i2c_master_receive(dev, b, sizeof b, IO_TIMEOUT_MS);
+    }
+    if (err != ESP_OK) {
+        printf("  SHT45  measurement FAILED: %s\n  SHT45  FAIL\n", esp_err_to_name(err));
+        return false;
+    }
+    if (sht4x_crc(&b[0]) != b[2] || sht4x_crc(&b[3]) != b[5]) {
+        printf("  SHT45  checksum wrong\n  SHT45  FAIL\n");
+        return false;
+    }
+    double t = -45.0 + 175.0 * ((b[0] << 8) | b[1]) / 65535.0;
+    double rh_raw = -6.0 + 125.0 * ((b[3] << 8) | b[4]) / 65535.0;
+    // The datasheet says to clamp to 0..100 %. Report the clamped value, but
+    //   flag a reading more than 5 % outside that range as out of range.
+    bool in_range = rh_raw >= -5.0 && rh_raw <= 105.0 && t >= -40 && t <= 125;
+    double rh = rh_raw < 0 ? 0 : (rh_raw > 100 ? 100 : rh_raw);
+    printf("  SHT45  %.2f C  %.1f %%RH  %s\n", t, rh,
+           in_range ? "PASS" : "FAIL (value out of range)");
+    *temp_c = t;
+    return in_range;
 }
 
 // Mean, standard deviation and min-to-max of the last n values.
@@ -362,6 +418,14 @@ void app_main(void)
         printf("device setup FAILED: %s\n", esp_err_to_name(err));
         return;
     }
+    // Without the SHT45 the thermistor readings still go on.
+    dev_cfg.device_address = SHT4X_ADDR;
+    i2c_master_dev_handle_t sht = NULL;
+    err = i2c_master_bus_add_device(bus, &dev_cfg, &sht);
+    if (err != ESP_OK) {
+        printf("SHT45 setup FAILED: %s, no SHT45 readings\n", esp_err_to_name(err));
+        sht = NULL;
+    }
 
     // Without a load the idle and load phases are the same, so say so.
     if (wifi_setup()) {
@@ -388,6 +452,10 @@ void app_main(void)
         }
         if (err != ESP_OK) {
             printf("  conversion FAILED: %s\n  FAIL\n", esp_err_to_name(err));
+            double st;
+            if (sht) {
+                sht45_read(sht, &st);
+            }
             vTaskDelay(pdMS_TO_TICKS(READ_PERIOD_MS));
             continue;
         }
@@ -398,6 +466,9 @@ void app_main(void)
         bool on_ok = a0 >= A0_ON_MIN_V && a0 <= A0_ON_MAX_V
                      && fabs(a0_first - a0_last) <= A0_DRIFT_MAX_V;
         bool ratio_ok = on_ok && ratio >= RATIO_MIN && ratio <= RATIO_MAX;
+        // Straight after the thermistor, so the two are about 0.1 s apart.
+        double st = 0;
+        bool s_ok = sht && sht45_read(sht, &st);
 
         printf("  switch off  A0 %.4f V  %s\n", off,
                off_ok ? "PASS" : "FAIL (switch not off)");
@@ -417,6 +488,9 @@ void app_main(void)
             double mean, sd, range;
             spread(temps, count, &mean, &sd, &range);
             printf("  ratio %.5f  %.1f ohm  %.2f C  PASS\n", ratio, r, t);
+            if (s_ok) {
+                printf("  thermistor - SHT45: %+.3f C\n", t - st);
+            }
             printf("  last %d: sd %.4f C, min-to-max %.4f C\n", count, sd, range);
             if (count == SPREAD_SETS) {
                 printf("  PHASE %s: mean %.4f C, sd %.4f C, min-to-max %.4f C, "

@@ -1,6 +1,6 @@
 # Ambient firmware
 
-Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py`). It has no ADS1115 code yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
+Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py` in the `logger-server` repo, which also holds the protocol description). It has no ADS1115 code yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
 
 The reading scheme (ratiometric, pulsed excitation on GPIO25, A0 for the excitation and A1 for the tap) is in [How the thermistor is read](WIRING.md#how-the-thermistor-is-read).
 
@@ -34,6 +34,19 @@ The firmware can't time conversions around WiFi activity: beacon wakes and delay
 |---|---|---|
 | Power-save (`WIFI_PS_MIN_MODEM`) | Stays associated and wakes at each DTIM beacon; the AP buffers packets; IP and DHCP lease survive | Already in use: it is the ESP-IDF default, so no call is needed |
 | Radio off (`esp_wifi_stop()`) | Sockets die; reconnecting takes about 1 to 3 s with DHCP (a static IP is faster) | Only for sample intervals of minutes or more; not needed for EMI |
+
+## Remote commands
+
+The logger only pushes: it sends to the collector and waits for the ack on the same socket, and never listens on a port of its own. Settings change only over the serial console. If remote control is wanted, there are two ways to add it.
+
+**Table 3: Remote command options (proposed, not decided)**
+
+| Option | Gains | Costs |
+|---|---|---|
+| Logger listens on a UDP port | Commands and on-demand readings at any time, within about a beacon interval | An open port: anyone on the LAN can send, and UDP senders are easy to fake, so settings changes need a shared-secret check. The collector must know each logger's IP (DHCP reservation, or learn it from the pushes). A receive task, a command parser (reusing the console commands) and replies with retries. Rules out turning the radio off between pushes |
+| Commands carried in the ack | No open port and no IPs to track; only the collector can send commands. Little firmware: parse the ack | A command waits for the next push, up to one push interval |
+
+Recommended: commands in the ack, unless replies within seconds are needed.
 
 ## Open items
 

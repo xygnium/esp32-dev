@@ -2,7 +2,7 @@
 // stage 12's WiFi push. Still no sensors.
 //
 // At boot and then every push interval (a setting, `config push`), the logger
-// sends a status line to the listener (udp_listener.py) and records whether an
+// sends a status line to the listener (logger-server/udp_listener.py) and records whether an
 // ack came back. The logger only pushes; it never listens. Push problems are
 // always printed on the serial console; successful pushes are hidden (quiet
 // on, the boot default) until `quiet off`. Commands come in on

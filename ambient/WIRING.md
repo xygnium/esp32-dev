@@ -263,7 +263,7 @@ Jack 2 (CAT5 #2) is color-coded only. Use the column that matches its colors, A 
 
 ## ADS1115 box
 
-A plastic switch box with a keystone cover plate, mounted open face down beside the warm box (proposed). The plate holds two RJ45 jacks facing down: jack 1 for CAT5 #1 and jack 2 for CAT5 #2. Vent at the top, behind fine screen against insects.
+A plastic switch box with a keystone cover plate, mounted open face down beside the warm box (built). The plate holds two RJ45 jacks facing down: jack 1 for CAT5 #1 and jack 2 for CAT5 #2. Vent at the top, behind fine screen against insects.
 
 Everything is wired on a perfboard inside. The ADS1115 breakout plugs into female headers; the divider resistor, the excitation switch (an AO3401 on a SOT-23-to-DIP adapter), filters and both jacks are wired to the same perfboard. The SDA, SCL and 3.3 V wires run from jack 1 through the ADS1115 to jack 2.
 
@@ -390,9 +390,9 @@ Outdoors, the leads are copper-clad steel, so cut ends or damaged tinning can ru
 - The SHT45 and thermistor sit side by side at the same height in the lower part of the hood, a few cm above the rim and away from the walls. The SHT45 faces down or sideways, never up.
 - Secure the breakout against loosening, for example with a dab of hot glue.
 
-### Hood (proposed)
+### Hood
 
-The sensors hang in free air under a small cover that keeps off drips from above (roof condensation, droppings), splashes and blown mist. The shed roof stays dry in heavy rain, so a single cover is enough.
+Built. Which candidate was used isn't recorded here. The sensors hang in free air under a small cover that keeps off drips from above (roof condensation, droppings), splashes and blown mist. The shed roof stays dry in heavy rain, so a single cover is enough.
 
 - **Candidates:** a single inverted plastic bowl about 20-25 cm across (the wide opening gives the best airflow), or a wide-mouth plastic jar (ice cream or mayonnaise) hung mouth down. No glass.
 - **Vents:** a jar has only one opening, so drill 4-6 holes (about 6 mm) near the top, behind fine screen if insects are a problem. Without them the air stagnates and the readings lag.
@@ -452,8 +452,7 @@ Each breakout adds its own pull-ups, so check the idle levels on the scan after 
 
 ## Open items
 
-- **Mounting:** the ADS1115 box (switch box and keystone plate) is proposed, not built. Mounting heights are not decided.
-- **Sensor hood:** bowl or jar, vents, the silicone seal and the hanger are proposed, not built.
+- **Mounting heights:** the ADS1115 box and the sensor hood are built; the heights aren't recorded here.
 - **ADS1115 board:** read the pin names off the board, and check whether it has its own series resistors or capacitors on A0 to A3.
 - **SHT45 pin order:** read it off the Adafruit 6174 before soldering.
 - **Firmware for GPIO25:** only `switch-probe` and `ads1115-probe` drive the switch, `ambient` doesn't yet. The logic is inverted: drive GPIO25 low to energize, high otherwise.

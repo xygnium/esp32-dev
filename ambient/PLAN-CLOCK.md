@@ -20,12 +20,12 @@ Temporary. When this is implemented, its decisions move into [FIRMWARE.md](FIRMW
 1. I2C bus 0: SDA 21, SCL 22, 100 kHz. The sensors will share it later.
 2. **DS3231 driver,** ported from `rtc-probe`: read and write the time, read and clear the oscillator-stop flag.
 3. **`clock.c`/`clock.h`:** the edge-aligned boot sync, the hourly slew, and the correction from the ack.
-4. **Boot:** check the DS3231 and apply the fault rules above, using project 1's empty-card check. After remediation there is no data: sampling waits until the time is set. The logger sends a **time request**, the status line marked `clock=unset`, and retries every 10 s until an ack sets the time.
+4. **Boot:** check the DS3231 and apply the fault rules above, using project 1's empty-card check. After remediation there is no data: sampling waits until the time is set. The logger sends a **time request**, the status line marked `clock=unset`, and retries every 10 s until an ack sets the time. Set the time, then clear the oscillator-stop flag, or the next boot sees the clock as invalid again.
 5. **Push:** time the round trip, parse the ack's milliseconds, and apply `clock auto` or `clock report`.
    - When to correct: only when the offset is over 50 ms, so the DS3231 isn't rewritten at every push.
    - After a DS3231 correction, resync the ESP32 at once.
 6. **Fault injection:** add `test fault rtc <reason>` to project 1's test-build command, for faults that can't be caused by hand, such as a failed DS3231 read at the hourly resync.
-7. **Console:** `status` gains a `clock` line (UTC time, last sync, last correction and the offset, any fault). The "(not used yet)" note on `clock` in `config get` goes.
+7. **Console:** `status` gains a `clock` line: UTC time, last sync, last correction, the last ack offset in ms with the round trip (for example `last ack offset +3 ms (round trip 8 ms)`), and any fault. Before the first sync it shows `clock  not set (waiting for ack)`, not a 1970 date. The "(not used yet)" note on `clock` in `config get` goes.
 8. Build, both with and without the test flag.
 
 ## Server (logserv)
@@ -42,10 +42,10 @@ Temporary. When this is implemented, its decisions move into [FIRMWARE.md](FIRMW
 ## Test (on the board)
 
 1. `config interval`: `2m 10m` is accepted, while `2m 5m` and `10s 1m` are refused. `config get` shows the new line. *(Left from the interval change, which is committed but untested on the board.)*
-2. Boot sync: the logger's time matches dev10 to within a few ms.
+2. Boot sync: once corrected, the last ack offset in `status` stays within a few ms of dev10. That offset is the logger's own comparison with dev10's ack time.
 3. Ack correction: offset the DS3231 deliberately and see `clock auto` correct it. Check `clock report` shows the offset without changing the clock.
 4. Unplug the DS3231 and boot: `fault rtc=missing` on the console and dev10.
-5. Remediation: set the oscillator-stop flag with an empty card. The logger waits, the first ack sets the time, and it runs normally. With data on the card, it's a hard fault.
+5. Remediation: set the oscillator-stop flag with an empty card. The logger waits, the first ack sets the time, and it runs normally. *(The second half, an invalid clock with data on the card giving a hard fault, is suspended until the logger writes to SD, like the SD not-empty test.)*
 6. Test build: `test fault rtc not_responding` gives the same console output and fault line as a real fault.
 7. Run for several hours: the hourly corrections stay small.
 

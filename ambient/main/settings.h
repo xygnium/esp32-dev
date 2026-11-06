@@ -58,4 +58,11 @@ const char *settings_set_listener(const char *host, uint16_t port);
 const char *settings_set_wifi(const char *ssid, const char *pass);
 const char *settings_set_low_mv(uint32_t mv);
 
+#ifdef AMBIENT_TEST_FAULTS
+// Test builds only: when on, the DS3231 is looked for at an unused address at
+// boot, so a missing chip is detected for real. Saved; takes effect at boot.
+bool settings_test_rtc_absent(void);
+const char *settings_set_test_rtc_absent(bool on);
+#endif
+
 #endif

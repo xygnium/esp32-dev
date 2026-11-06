@@ -14,6 +14,7 @@
 #include "esp_timer.h"
 
 #include "ambient.h"
+#include "clock.h"
 #include "fault.h"
 #include "sd.h"
 #include "settings.h"
@@ -165,6 +166,27 @@ static int cmd_status(int argc, char **argv)
         printf("FAULT      %s: %s (normal work stopped; fix it and reboot)\n", fault_src_name(fsrc), freason);
     }
     printf("uptime     %" PRIu64 " s\n", (uint64_t)(esp_timer_get_time() / 1000000));
+    clock_info_t ck;
+    clock_get_info(&ck);
+    if (fault_get(&fsrc, &freason) && fsrc == FAULT_RTC) {
+        printf("clock      FAULT: %s\n", freason);
+    } else if (!ck.set) {
+        printf("clock      not set (waiting for ack)\n");
+    } else {
+        char now[40];
+        clock_now_str(now, sizeof now);
+        printf("clock      %s, DS3231 synced %lld s ago", now,
+               (long long)(esp_timer_get_time() / 1000000 - ck.last_sync_up_s));
+        if (ck.ack_seen) {
+            printf(", last ack offset %+ld ms (round trip %ld ms)", (long)ck.ack_offset_ms,
+                   (long)ck.ack_rtt_ms);
+        }
+        if (ck.correction_up_s >= 0) {
+            printf(", DS3231 corrected %+ld ms at uptime %lld s", (long)ck.correction_ms,
+                   (long long)ck.correction_up_s);
+        }
+        printf("\n");
+    }
 
     if (wifi_is_connected()) {
         char ip[16], ap[18];
@@ -250,17 +272,40 @@ static int cmd_info(int argc, char **argv)
 // Raise a fault through the same path as a real one.
 static int cmd_test(int argc, char **argv)
 {
-    static const char *const sd_reasons[] = { "missing", "mount_failed", "not_responding" };
-    if (argc == 4 && strcmp(argv[1], "fault") == 0 && strcmp(argv[2], "sd") == 0) {
-        for (size_t i = 0; i < sizeof(sd_reasons) / sizeof(sd_reasons[0]); i++) {
-            if (strcmp(argv[3], sd_reasons[i]) == 0) {
-                fault_raise(FAULT_SD, sd_reasons[i]);
+    static const char *const sd_reasons[] = { "missing", "mount_failed", "not_responding", NULL };
+    static const char *const rtc_reasons[] = { "missing", "invalid", "not_responding", NULL };
+    if (argc == 4 && strcmp(argv[1], "fault") == 0) {
+        bool sd = strcmp(argv[2], "sd") == 0, rtc = strcmp(argv[2], "rtc") == 0;
+        const char *const *reasons = sd ? sd_reasons : rtc ? rtc_reasons : NULL;
+        for (size_t i = 0; reasons && reasons[i]; i++) {
+            if (strcmp(argv[3], reasons[i]) == 0) {
+                fault_raise(sd ? FAULT_SD : FAULT_RTC, reasons[i]);
                 ambient_wake();       // push the fault line now
                 return 0;
             }
         }
     }
-    printf("usage: test fault sd missing|mount_failed|not_responding\n");
+    if (argc == 3 && strcmp(argv[1], "rtc-absent") == 0
+        && (strcmp(argv[2], "on") == 0 || strcmp(argv[2], "off") == 0)) {
+        bool on = strcmp(argv[2], "on") == 0;
+        int rc = report(settings_set_test_rtc_absent(on));
+        if (rc == 0) {
+            printf("DS3231 %s at the next boot; reboot to apply\n",
+                   on ? "simulated missing" : "looked for normally");
+        }
+        return rc;
+    }
+    uint32_t secs;
+    if (argc == 3 && strcmp(argv[1], "resync") == 0 && parse_u32(argv[2], &secs) && secs >= 10) {
+        clock_test_set_resync(secs);
+        printf("DS3231 resync every %" PRIu32 " s until reboot\n", secs);
+        ambient_wake();
+        return 0;
+    }
+    printf("usage: test fault sd missing|mount_failed|not_responding\n"
+           "       test fault rtc missing|invalid|not_responding\n"
+           "       test rtc-absent on|off   (at boot, look for the DS3231 at an unused address)\n"
+           "       test resync <seconds>    (resync from the DS3231 this often, 10 s or more, until reboot)\n");
     return 1;
 }
 #endif
@@ -278,7 +323,7 @@ static void config_print(void)
     printf("   (sampling not used yet)\n");
     printf("window     %02u:%02u-%02u:%02u UTC   (not used yet)\n",
            cfg.window_start / 60, cfg.window_start % 60, cfg.window_end / 60, cfg.window_end % 60);
-    printf("clock      %s   (not used yet)\n", cfg.clock_auto ? "auto" : "report");
+    printf("clock      %s\n", cfg.clock_auto ? "auto" : "report");
     print_listener(&cfg);
     printf("lowv       %lu.%02lu V   (supply-low threshold)\n", (unsigned long)(cfg.low_mv / 1000),
            (unsigned long)(cfg.low_mv % 1000 / 10));
@@ -425,7 +470,7 @@ int console_start(void)
         { .command = "reboot", .help = "Restart the logger; settings are kept",       .func = cmd_reboot },
 #ifdef AMBIENT_TEST_FAULTS
         { .command = "test",   .help = "TEST BUILD: raise a hard fault as if it were real",
-          .hint = "fault sd missing|mount_failed|not_responding", .func = cmd_test },
+          .hint = "fault sd|rtc <reason> | rtc-absent on|off | resync <s>", .func = cmd_test },
 #endif
     };
 

@@ -42,6 +42,7 @@ const char *fault_src_name(fault_src_t src)
 {
     switch (src) {
     case FAULT_SD:   return "sd";
+    case FAULT_RTC:  return "rtc";
     case FAULT_NONE: break;
     }
     return "none";

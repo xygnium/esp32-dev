@@ -1,5 +1,5 @@
-// Settings that survive a restart, a serial console, WiFi pushes and the SD
-// card. Still no sensors and no logging.
+// Settings that survive a restart, a serial console, WiFi pushes, the SD card
+// and the clock (clock.c). Still no sensors and no logging.
 //
 // At boot and then every push interval (a setting, `config interval`), the logger
 // sends a status line to the listener (logger-server/udp_listener.py) and records whether an
@@ -23,6 +23,12 @@
 // the listener at once and then every push interval, as
 //   fault sd=<missing|mount_failed|not_responding> seq=<n> up=<s> mac=<own MAC>
 // Only a reboot clears it.
+//
+// Clock (clock.c): a DS3231 fault is a hard fault too (fault rtc=<missing|
+// invalid|not_responding>). After a remediated restart (invalid DS3231, empty
+// card) the clock is unset: the status line carries clock=unset and is sent
+// every UNSET_RETRY_S as a time request until an ack sets the time. Each ack's
+// time, plus half the round trip, is passed to the clock.
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -35,6 +41,7 @@
 #include "esp_timer.h"
 
 #include "ambient.h"
+#include "clock.h"
 #include "console_cmds.h"
 #include "fault.h"
 #include "sd.h"
@@ -44,6 +51,7 @@
 
 #define CONNECT_TIMEOUT_MS 30000
 #define REPLY_TIMEOUT_MS 2000
+#define UNSET_RETRY_S 10        // time requests while the clock is unset
 
 static const char *TAG = "ambient";
 
@@ -151,17 +159,21 @@ static void push_once(const settings_t *cfg, const char *mac, uint32_t seq)
     } else {
         len = snprintf(msg, sizeof(msg),
                        "hello seq=%" PRIu32 " up=%" PRIu64 " rssi=%d ap=%s ip=%s mac=%s reconnects=%" PRIu32
-                       " push_s=%" PRIu32 " vin_mv=%" PRIu32,
-                       seq, up, rssi, bssid, ip, mac, wifi_reconnect_count(), cfg->push_s, vin_mv);
+                       " push_s=%" PRIu32 " vin_mv=%" PRIu32 "%s",
+                       seq, up, rssi, bssid, ip, mac, wifi_reconnect_count(), cfg->push_s, vin_mv,
+                       clock_is_set() ? "" : " clock=unset");
     }
 
+    int64_t sent_us = esp_timer_get_time();
     int rc = wifi_udp_exchange(cfg->listener_host, cfg->listener_port, msg, len,
                                reply, sizeof(reply), &reply_len, REPLY_TIMEOUT_MS);
+    int64_t rtt_us = esp_timer_get_time() - sent_us;
     if (rc == 0) {
         if (!s_quiet) {
             ESP_LOGI(TAG, "seq %" PRIu32 ": %s", seq, reply);
         }
         record(PUSH_OK, seq, reply);
+        clock_on_ack(reply, rtt_us, cfg->clock_auto);
     } else if (rc == -2) {
         ESP_LOGW(TAG, "seq %" PRIu32 ": no reply", seq);
         record(PUSH_NO_REPLY, seq, NULL);
@@ -180,6 +192,7 @@ void app_main(void)
     esp_log_level_set("ambient", ESP_LOG_INFO);
     esp_log_level_set("supply", ESP_LOG_INFO);
     esp_log_level_set("sd", ESP_LOG_INFO);
+    esp_log_level_set("clock", ESP_LOG_INFO);
 #ifdef AMBIENT_TEST_FAULTS
     ESP_LOGW(TAG, "TEST BUILD: fault injection enabled (test fault ...); not for production");
 #endif
@@ -194,8 +207,10 @@ void app_main(void)
     // Console before WiFi, so wrong WiFi settings can be fixed from it.
     console_start();
 
-    // A card fault is raised here; WiFi still starts so it can be reported.
+    // Card and clock faults are raised here; WiFi still starts so they can be
+    // reported. The clock needs the card's empty check.
     sd_init();
+    clock_init();
 
     int wrc = wifi_connect(cfg.wifi_ssid, cfg.wifi_pass, CONNECT_TIMEOUT_MS);
     if (wrc == -1) {
@@ -225,9 +240,11 @@ void app_main(void)
     while (1) {
         settings_get(&cfg);
         int64_t now = esp_timer_get_time();
-        int64_t due = first ? now : last_push_us + (int64_t)cfg.push_s * 1000000;
-        int64_t check_due = last_check_us + (int64_t)cfg.sample_s * 1000000;
         bool in_fault = fault_get(NULL, NULL);
+        uint32_t every_s = (in_fault || clock_is_set()) ? cfg.push_s : UNSET_RETRY_S;
+        int64_t due = first ? now : last_push_us + (int64_t)every_s * 1000000;
+        int64_t check_due = last_check_us + (int64_t)cfg.sample_s * 1000000;
+        int64_t clock_due = clock_next_due_us();
         portENTER_CRITICAL(&s_stats_mux);
         s_next_due_us = due;
         portEXIT_CRITICAL(&s_stats_mux);
@@ -235,6 +252,10 @@ void app_main(void)
         if (now >= check_due) {
             sd_check();
             last_check_us = now;
+            continue;
+        }
+        if (now >= clock_due) {
+            clock_poll();
             continue;
         }
         if (s_push_now || now >= due || (in_fault && !fault_pushed)) {
@@ -249,6 +270,9 @@ void app_main(void)
         // (setting changed, `push`, or an injected fault). +1 tick so we never
         // wake just short of due.
         int64_t next = due < check_due ? due : check_due;
+        if (clock_due < next) {
+            next = clock_due;
+        }
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((next - now) / 1000) + 1);
     }
 }

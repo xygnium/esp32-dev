@@ -14,6 +14,8 @@
 #include "esp_timer.h"
 
 #include "ambient.h"
+#include "fault.h"
+#include "sd.h"
 #include "settings.h"
 #include "supply.h"
 #include "wifi.h"
@@ -157,6 +159,11 @@ static int cmd_status(int argc, char **argv)
     settings_get(&cfg);
     ambient_get_push_stats(&ps);
 
+    fault_src_t fsrc;
+    const char *freason;
+    if (fault_get(&fsrc, &freason)) {
+        printf("FAULT      %s: %s (normal work stopped; fix it and reboot)\n", fault_src_name(fsrc), freason);
+    }
     printf("uptime     %" PRIu64 " s\n", (uint64_t)(esp_timer_get_time() / 1000000));
 
     if (wifi_is_connected()) {
@@ -203,6 +210,19 @@ static int cmd_status(int argc, char **argv)
     } else {
         printf("supply     no reading yet\n");
     }
+    sd_info_t sd;
+    sd_get_info(&sd);
+    if (fault_get(&fsrc, &freason) && fsrc == FAULT_SD) {
+        printf("sd         FAULT: %s\n", freason);
+    } else if (!sd.mounted) {
+        printf("sd         not mounted\n");
+    } else if (sd.size_ok) {
+        printf("sd         mounted, %llu MB, %llu MB free, %s at boot\n",
+               (unsigned long long)(sd.total_bytes >> 20), (unsigned long long)(sd.free_bytes >> 20),
+               sd.empty ? "empty" : "not empty");
+    } else {
+        printf("sd         mounted (size unknown), %s at boot\n", sd.empty ? "empty" : "not empty");
+    }
     printf("settings   %s\n", settings_saved_to_flash() ? "saved in flash"
                                                        : "NOT saved: NVS unavailable, defaults in use");
     return 0;
@@ -218,8 +238,32 @@ static int cmd_info(int argc, char **argv)
     printf("firmware   %s %s, built %s %s\n", app->project_name, app->version, app->date, app->time);
     printf("esp-idf    %s\n", app->idf_ver);
     printf("mac        %s\n", mac);
+#ifdef AMBIENT_TEST_FAULTS
+    printf("build      TEST: fault injection enabled; not for production\n");
+#endif
     return 0;
 }
+
+#ifdef AMBIENT_TEST_FAULTS
+// --- test (test builds only) ---
+
+// Raise a fault through the same path as a real one.
+static int cmd_test(int argc, char **argv)
+{
+    static const char *const sd_reasons[] = { "missing", "mount_failed", "not_responding" };
+    if (argc == 4 && strcmp(argv[1], "fault") == 0 && strcmp(argv[2], "sd") == 0) {
+        for (size_t i = 0; i < sizeof(sd_reasons) / sizeof(sd_reasons[0]); i++) {
+            if (strcmp(argv[3], sd_reasons[i]) == 0) {
+                fault_raise(FAULT_SD, sd_reasons[i]);
+                ambient_wake();       // push the fault line now
+                return 0;
+            }
+        }
+    }
+    printf("usage: test fault sd missing|mount_failed|not_responding\n");
+    return 1;
+}
+#endif
 
 // --- config ---
 
@@ -379,6 +423,10 @@ int console_start(void)
         { .command = "quiet",  .help = "Hide (on) or show (off) successful pushes on this console; on at boot",
           .hint = "[on|off]", .func = cmd_quiet },
         { .command = "reboot", .help = "Restart the logger; settings are kept",       .func = cmd_reboot },
+#ifdef AMBIENT_TEST_FAULTS
+        { .command = "test",   .help = "TEST BUILD: raise a hard fault as if it were real",
+          .hint = "fault sd missing|mount_failed|not_responding", .func = cmd_test },
+#endif
     };
 
     esp_err_t err = esp_console_register_help_command();

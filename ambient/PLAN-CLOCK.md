@@ -1,6 +1,6 @@
 # Plan: clocks and time stamps (project 2 of 2)
 
-Temporary. When this is implemented, its decisions move into [FIRMWARE.md](FIRMWARE.md) and this file is deleted. Needs project 1, [PLAN-SD.md](PLAN-SD.md): the hard-fault mechanism and the empty-card check.
+Temporary. When this is implemented, its decisions move into [FIRMWARE.md](FIRMWARE.md) and this file is deleted. Builds on project 1 (done; see "SD card and hard faults" in [FIRMWARE.md](FIRMWARE.md)): the hard-fault mechanism, `test fault` and the empty-card check (`sd_is_empty()`).
 
 ## Decided
 

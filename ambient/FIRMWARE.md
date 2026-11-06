@@ -1,6 +1,6 @@
 # Ambient firmware
 
-Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py` in the `logger-server` repo, which also holds the protocol description). It has no ADS1115 code yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
+Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py` in the `logger-server` repo, which also holds the protocol description), and mounts and checks the SD card. It has no sensor code and no logging yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
 
 The reading scheme (ratiometric, pulsed excitation on GPIO25, A0 for the excitation and A1 for the tap) is in [How the thermistor is read](WIRING.md#how-the-thermistor-is-read).
 
@@ -48,7 +48,19 @@ The logger only pushes: it sends to the collector and waits for the ack on the s
 
 Recommended: commands in the ack, unless replies within seconds are needed.
 
+## SD card and hard faults
+
+- **Mounting:** at boot, over SPI (VSPI: SCK 18, MISO 19, MOSI 23, CS 4, 4 MHz), at `/sdcard`. The logger **never formats** a card. Cards are formatted on a PC (FAT32).
+- **Health check:** at every sample interval the logger asks the card for its status (`sdmmc_get_status`). That's read-only, so nothing is written. Once logging exists, each sample's write is the check.
+- **Empty card:** at boot the logger notes whether the root holds anything except `System Volume Information` (Windows makes it when formatting). The clock work uses this to recognise a remediated restart.
+- **Hard fault:** a missing card (`missing`), a card that doesn't mount (`mount_failed`) or a card that stops answering (`not_responding`) stops normal work. There is no carrying on without the card.
+  - The console stays up, and `status` shows the fault.
+  - The fault is printed and pushed to the listener at once, then every push interval, in place of the status line: `fault sd=<reason> seq=<n> up=<s> mac=<own MAC>`.
+  - Only a reboot clears it. The first fault is kept; later ones are only logged.
+- **Fault injection (test builds only):** `./build-test.sh` and `./flash-test.sh` build into `build-test/` with `AMBIENT_TEST_FAULTS`, which adds `test fault sd <reason>`. It raises the fault through the same path as a real one, for faults that can't be caused by hand. `info` says `TEST` in a test build. Production builds (`./build.sh`, `./flash.sh`) don't contain the command.
+
 ## Open items
 
+- **SD test, not-empty card:** with files on the card, `status` should say `not empty at boot`. Suspended until the logger writes to the card.
 - **Write the ADS1115 code** to Table 1. Read A0, A1, A0 and average the two A0 readings, so the ratio holds even if the excitation moves between readings. Then run the noise test in WIRING.md (build step 3) with WiFi idle and with WiFi plus SD writes.
 - **Keepalive:** if the firmware ever moves from UDP status lines to MQTT, set the keepalive longer than any quiet period. The broker drops a session after 1.5 times the keepalive with no traffic.

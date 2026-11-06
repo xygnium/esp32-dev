@@ -1,5 +1,6 @@
-# Build dir
+# Build dirs
 build/
+build-test/
 
 # ESP-IDF generated config (per-machine/per-target; sdkconfig.defaults is committed instead)
 sdkconfig

@@ -1,5 +1,5 @@
-// Stage 12c: settings that survive a restart, and a serial console, on top of
-// stage 12's WiFi push. Still no sensors.
+// Settings that survive a restart, a serial console, WiFi pushes and the SD
+// card. Still no sensors and no logging.
 //
 // At boot and then every push interval (a setting, `config interval`), the logger
 // sends a status line to the listener (logger-server/udp_listener.py) and records whether an
@@ -16,6 +16,13 @@
 // The supply voltage is read just before each push and checked against the
 // low-supply threshold (supply.c); from stage 20 it's read at every sample.
 // A missing reply is counted and logged; nothing is resent.
+//
+// SD card (sd.c): mounted at boot, never formatted, and checked at every
+// sample interval. A missing or failing card is a hard fault (fault.c):
+// normal pushes stop, and the fault is printed on the console and pushed to
+// the listener at once and then every push interval, as
+//   fault sd=<missing|mount_failed|not_responding> seq=<n> up=<s> mac=<own MAC>
+// Only a reboot clears it.
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -29,6 +36,8 @@
 
 #include "ambient.h"
 #include "console_cmds.h"
+#include "fault.h"
+#include "sd.h"
 #include "settings.h"
 #include "supply.h"
 #include "wifi.h"
@@ -100,10 +109,18 @@ static void record(push_result_t r, uint32_t seq, const char *reply)
     portEXIT_CRITICAL(&s_stats_mux);
 }
 
+// One push: the status line, or the fault line while in a hard fault.
 static void push_once(const settings_t *cfg, const char *mac, uint32_t seq)
 {
     uint32_t vin_mv = 0;
     supply_check(cfg->low_mv, &vin_mv);     // leaves 0 if no reading
+
+    fault_src_t fsrc;
+    const char *freason;
+    bool in_fault = fault_get(&fsrc, &freason);
+    if (in_fault) {
+        ESP_LOGE(TAG, "HARD FAULT %s: %s. Fix it and reboot", fault_src_name(fsrc), freason);
+    }
 
     if (cfg->listener_host[0] == '\0') {
         ESP_LOGW(TAG, "seq %" PRIu32 ": listener not set; use config listener <ip> <port>", seq);
@@ -126,11 +143,17 @@ static void push_once(const settings_t *cfg, const char *mac, uint32_t seq)
     wifi_ip_str(ip, sizeof(ip));
     wifi_rssi(&rssi);
     wifi_bssid_str(bssid, sizeof(bssid));
-    int len = snprintf(msg, sizeof(msg),
+    uint64_t up = (uint64_t)(esp_timer_get_time() / 1000000);
+    int len;
+    if (in_fault) {
+        len = snprintf(msg, sizeof(msg), "fault %s=%s seq=%" PRIu32 " up=%" PRIu64 " mac=%s",
+                       fault_src_name(fsrc), freason, seq, up, mac);
+    } else {
+        len = snprintf(msg, sizeof(msg),
                        "hello seq=%" PRIu32 " up=%" PRIu64 " rssi=%d ap=%s ip=%s mac=%s reconnects=%" PRIu32
                        " push_s=%" PRIu32 " vin_mv=%" PRIu32,
-                       seq, (uint64_t)(esp_timer_get_time() / 1000000), rssi, bssid, ip, mac,
-                       wifi_reconnect_count(), cfg->push_s, vin_mv);
+                       seq, up, rssi, bssid, ip, mac, wifi_reconnect_count(), cfg->push_s, vin_mv);
+    }
 
     int rc = wifi_udp_exchange(cfg->listener_host, cfg->listener_port, msg, len,
                                reply, sizeof(reply), &reply_len, REPLY_TIMEOUT_MS);
@@ -156,6 +179,10 @@ void app_main(void)
     // sdkconfig.defaults); the app's informational lines are turned back on.
     esp_log_level_set("ambient", ESP_LOG_INFO);
     esp_log_level_set("supply", ESP_LOG_INFO);
+    esp_log_level_set("sd", ESP_LOG_INFO);
+#ifdef AMBIENT_TEST_FAULTS
+    ESP_LOGW(TAG, "TEST BUILD: fault injection enabled (test fault ...); not for production");
+#endif
 
     // Settings first: NVS must be ready before WiFi starts, and a failure
     // here just means running on defaults.
@@ -167,13 +194,16 @@ void app_main(void)
     // Console before WiFi, so wrong WiFi settings can be fixed from it.
     console_start();
 
+    // A card fault is raised here; WiFi still starts so it can be reported.
+    sd_init();
+
     int wrc = wifi_connect(cfg.wifi_ssid, cfg.wifi_pass, CONNECT_TIMEOUT_MS);
     if (wrc == -1) {
         ESP_LOGW(TAG, "not connected after %d s; still trying", CONNECT_TIMEOUT_MS / 1000);
     } else if (wrc == -3) {
         ESP_LOGW(TAG, "WiFi not set; use config wifi <ssid> <password>");
     } else if (wrc == -2) {
-        // Carry on: later stages keep logging to the SD card without WiFi.
+        // Carry on: the SD card is the record; pushes resume if WiFi returns.
         ESP_LOGE(TAG, "WiFi setup failed; continuing without WiFi");
     } else {
         char ip[16];
@@ -183,29 +213,42 @@ void app_main(void)
     char mac[18];
     wifi_mac_str(mac, sizeof(mac));
 
-    // Push once at boot, then every push interval. The interval is re-read on
-    // every wake, so a `config interval` change also re-times the push currently
-    // being waited for (pushing at once if it is now overdue).
+    // Push once at boot, then every push interval; check the SD card every
+    // sample interval. Both intervals are re-read on every wake, so a
+    // `config interval` change also re-times what is being waited for. A new
+    // fault is pushed at once, then every push interval.
     uint32_t seq = 0;
     bool first = true;
+    bool fault_pushed = false;
     int64_t last_push_us = 0;
+    int64_t last_check_us = esp_timer_get_time();
     while (1) {
         settings_get(&cfg);
         int64_t now = esp_timer_get_time();
         int64_t due = first ? now : last_push_us + (int64_t)cfg.push_s * 1000000;
+        int64_t check_due = last_check_us + (int64_t)cfg.sample_s * 1000000;
+        bool in_fault = fault_get(NULL, NULL);
         portENTER_CRITICAL(&s_stats_mux);
         s_next_due_us = due;
         portEXIT_CRITICAL(&s_stats_mux);
 
-        if (s_push_now || now >= due) {
+        if (now >= check_due) {
+            sd_check();
+            last_check_us = now;
+            continue;
+        }
+        if (s_push_now || now >= due || (in_fault && !fault_pushed)) {
             s_push_now = false;
             first = false;
+            fault_pushed = in_fault;
             push_once(&cfg, mac, seq++);
             last_push_us = esp_timer_get_time();
             continue;
         }
-        // Sleep until due, or until the console wakes us (setting changed,
-        // or `push`). +1 tick so we never wake just short of due.
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((due - now) / 1000) + 1);
+        // Sleep until the next push or check, or until the console wakes us
+        // (setting changed, `push`, or an injected fault). +1 tick so we never
+        // wake just short of due.
+        int64_t next = due < check_due ? due : check_due;
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS((next - now) / 1000) + 1);
     }
 }

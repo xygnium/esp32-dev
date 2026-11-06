@@ -1,5 +1,6 @@
-// Settings that survive a restart, a serial console, WiFi pushes, the SD card
-// and the clock (clock.c). Still no sensors and no logging.
+// Settings that survive a restart, a serial console, WiFi pushes, the SD card,
+// the clock (clock.c) and sensor sampling (sensors.c). No logging yet: the
+// readings are kept in memory and shown by `status` and `read`.
 //
 // At boot and then every push interval (a setting, `config interval`), the logger
 // sends a status line to the listener (logger-server/udp_listener.py) and records whether an
@@ -29,6 +30,10 @@
 // card) the clock is unset: the status line carries clock=unset and is sent
 // every UNSET_RETRY_S as a time request until an ack sets the time. Each ack's
 // time, plus half the round trip, is passed to the clock.
+//
+// Sensors (sensors.c): sampled every sample interval while the clock is set
+// and there is no hard fault. A failed sensor is a soft failure: the others
+// carry on and it is tried again at the next sample.
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -45,8 +50,10 @@
 #include "console_cmds.h"
 #include "fault.h"
 #include "sd.h"
+#include "sensors.h"
 #include "settings.h"
 #include "supply.h"
+#include "thermistor.h"
 #include "wifi.h"
 
 #define CONNECT_TIMEOUT_MS 30000
@@ -185,6 +192,8 @@ static void push_once(const settings_t *cfg, const char *mac, uint32_t seq)
 
 void app_main(void)
 {
+    // Excitation off before anything that could take time.
+    thermistor_pin_init();
     s_loop_task = xTaskGetCurrentTaskHandle();
 
     // ESP-IDF's own messages are built at warnings-and-errors only (see
@@ -193,6 +202,7 @@ void app_main(void)
     esp_log_level_set("supply", ESP_LOG_INFO);
     esp_log_level_set("sd", ESP_LOG_INFO);
     esp_log_level_set("clock", ESP_LOG_INFO);
+    esp_log_level_set("sensors", ESP_LOG_INFO);
 #ifdef AMBIENT_TEST_FAULTS
     ESP_LOGW(TAG, "TEST BUILD: fault injection enabled (test fault ...); not for production");
 #endif
@@ -211,6 +221,7 @@ void app_main(void)
     // reported. The clock needs the card's empty check.
     sd_init();
     clock_init();
+    sensors_init();
 
     int wrc = wifi_connect(cfg.wifi_ssid, cfg.wifi_pass, CONNECT_TIMEOUT_MS);
     if (wrc == -1) {
@@ -228,8 +239,8 @@ void app_main(void)
     char mac[18];
     wifi_mac_str(mac, sizeof(mac));
 
-    // Push once at boot, then every push interval; check the SD card every
-    // sample interval. Both intervals are re-read on every wake, so a
+    // Push once at boot, then every push interval; check the SD card and
+    // sample the sensors every sample interval. Both intervals are re-read on every wake, so a
     // `config interval` change also re-times what is being waited for. A new
     // fault is pushed at once, then every push interval.
     uint32_t seq = 0;
@@ -251,6 +262,9 @@ void app_main(void)
 
         if (now >= check_due) {
             sd_check();
+            if (!fault_get(NULL, NULL) && clock_is_set()) {
+                sensors_sample();
+            }
             last_check_us = now;
             continue;
         }

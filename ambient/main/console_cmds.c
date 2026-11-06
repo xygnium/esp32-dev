@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -17,6 +18,7 @@
 #include "clock.h"
 #include "fault.h"
 #include "sd.h"
+#include "sensors.h"
 #include "settings.h"
 #include "supply.h"
 #include "wifi.h"
@@ -153,6 +155,65 @@ static const char *result_name(push_result_t r)
     return "?";
 }
 
+// --- sensors ---
+
+static void print_utc(int64_t us)
+{
+    time_t sec = (time_t)(us / 1000000);
+    struct tm t;
+    gmtime_r(&sec, &t);
+    printf("%04d-%02d-%02dT%02d:%02d:%02d.%03dZ", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+           t.tm_hour, t.tm_min, t.tm_sec, (int)(us % 1000000 / 1000));
+}
+
+static void print_values(sensor_id_t id, const double *v)
+{
+    switch (id) {
+    case SENSOR_THERMISTOR: printf("%.2f C, ratio %.5f", v[0], v[1]); break;
+    case SENSOR_SHT45:      printf("%.2f C, %.1f %%RH", v[0], v[1]); break;
+    case SENSOR_BMP388:     printf("%.2f C, %.2f hPa", v[0], v[1] / 100.0); break;
+    default:                break;
+    }
+}
+
+// One line per sensor: its last values and stamp, or its last failure.
+static void print_sensors(void)
+{
+    for (int i = 0; i < SENSOR_COUNT; i++) {
+        sensor_reading_t r;
+        sensors_get((sensor_id_t)i, &r);
+        printf("%-10s ", sensor_name((sensor_id_t)i));
+        if (!r.read) {
+            printf("not read yet\n");
+            continue;
+        }
+        if (!r.ok) {
+            printf("FAILED: %s (%" PRIu32 " in a row)", r.err, r.fails);
+            if (r.utc_us) {
+                printf(", last good ");
+                print_utc(r.utc_us);
+            }
+            printf("\n");
+            continue;
+        }
+        print_values((sensor_id_t)i, r.value);
+        printf(" at ");
+        print_utc(r.utc_us);
+        printf("\n");
+    }
+}
+
+static int cmd_read(int argc, char **argv)
+{
+    if (!clock_is_set()) {
+        printf("clock not set: readings would have no time stamp\n");
+        return 1;
+    }
+    sensors_sample();
+    print_sensors();
+    return 0;
+}
+
 static int cmd_status(int argc, char **argv)
 {
     settings_t cfg;
@@ -232,6 +293,7 @@ static int cmd_status(int argc, char **argv)
     } else {
         printf("supply     no reading yet\n");
     }
+    print_sensors();
     sd_info_t sd;
     sd_get_info(&sd);
     if (fault_get(&fsrc, &freason) && fsrc == FAULT_SD) {
@@ -320,7 +382,7 @@ static void config_print(void)
     print_duration(cfg.sample_s);
     printf(", push ");
     print_duration(cfg.push_s);
-    printf("   (sampling not used yet)\n");
+    printf("\n");
     printf("window     %02u:%02u-%02u:%02u UTC   (not used yet)\n",
            cfg.window_start / 60, cfg.window_start % 60, cfg.window_end / 60, cfg.window_end % 60);
     printf("clock      %s\n", cfg.clock_auto ? "auto" : "report");
@@ -460,11 +522,12 @@ static int cmd_reboot(int argc, char **argv)
 int console_start(void)
 {
     const esp_console_cmd_t cmds[] = {
-        { .command = "status", .help = "Running time, WiFi, listener, push results", .func = cmd_status },
+        { .command = "status", .help = "Running time, clock, WiFi, pushes, sensors, SD card", .func = cmd_status },
         { .command = "info",   .help = "Firmware version, build date, MAC address",  .func = cmd_info },
         { .command = "config", .help = "Show or change settings; 'config' alone lists the forms",
           .hint = "get | interval | window | clock | listener | lowv | wifi ...", .func = cmd_config },
         { .command = "push",   .help = "Push now, outside the schedule",              .func = cmd_push },
+        { .command = "read",   .help = "Read the sensors now and print the readings", .func = cmd_read },
         { .command = "quiet",  .help = "Hide (on) or show (off) successful pushes on this console; on at boot",
           .hint = "[on|off]", .func = cmd_quiet },
         { .command = "reboot", .help = "Restart the logger; settings are kept",       .func = cmd_reboot },

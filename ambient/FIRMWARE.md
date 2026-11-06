@@ -1,6 +1,6 @@
 # Ambient firmware
 
-Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py` in the `logger-server` repo, which also holds the protocol description), mounts and checks the SD card, and keeps time from the DS3231 (see [Time](#time)). It has no sensor code and no logging yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
+Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py` in the `logger-server` repo, which also holds the protocol description), mounts and checks the SD card, keeps time from the DS3231 (see [Time](#time)), and samples the sensors (see [Sensors](#sensors)). It doesn't log or push the readings yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
 
 The reading scheme (ratiometric, pulsed excitation on GPIO25, A0 for the excitation and A1 for the tap) is in [How the thermistor is read](WIRING.md#how-the-thermistor-is-read).
 
@@ -16,7 +16,7 @@ The firmware can't time conversions around WiFi activity: beacon wakes and delay
 
 ## Sampling
 
-**Table 1: Sampling decisions (proposed, not yet implemented)**
+**Table 1: Thermistor sampling decisions (implemented in `thermistor.c`)**
 
 | Setting | Choice | Why |
 |---|---|---|
@@ -73,6 +73,28 @@ Recommended: commands in the ack, unless replies within seconds are needed.
 - **Test builds:** `test fault rtc <reason>` injects a fault. `test rtc-absent on|off` (saved, takes effect at boot) makes the logger look for the DS3231 at 0x69, where nothing answers, so a missing chip is detected for real. `test resync <seconds>` resyncs that often instead of hourly, until reboot.
 - **First run (2026-11-06):** the DS3231 was found 80.3 s slow, left over from setting it with `rtc-probe` from the build time. The first ack corrected it; after that the ack offset stayed at about +1 to +8 ms (round trip 13 to 20 ms), under the 50 ms threshold. A steady +8 ms may be the DS3231 slightly behind dev10, or an asymmetric network delay; not investigated. With `test resync 15` the resync ran every 16 s (15 s plus the edge wait) and found the ESP32 within ±1 ms of the DS3231 each time.
 
+## Sensors
+
+- **Code:** ported from the probes that ran on this hardware. The thermistor (`thermistor.c`) comes from `ads1115-probe`, not the shared `ads1115_core` library. The SHT45 (`sht45.c`) and the BMP388 (`bmp388.c`) come from `sensor-probe`. The probes stay as diagnostics.
+- **Sample:** every sample interval, while the clock is set and there is no hard fault. The order is the thermistor (about 0.42 s), the SHT45 straight after (so the two temperatures are close in time), then the BMP388. The first sample is one sample interval after boot. At boot GPIO25 is driven high (excitation off) before anything else.
+- **Time stamps:** each reading gets its own UTC stamp with milliseconds, taken when its measurement finishes. A sensor's values share its stamp.
+- **Thermistor:** Table 1. The ratio is A1 over the mean of the two A0 readings. The resistance is corrected for the ADC input (4.3 MΩ), then converted with Steinhart-Hart and the generic coefficients (WIRING.md). The probe's "A0 near 0 V when off" check is left out: it costs a 0.13 s conversion each sample and stays in `ads1115-probe`.
+- **BMP388:** soft reset and calibration at the first reading, then one forced measurement per reading. After any failure the reset and calibration are redone, so a replaced chip comes back.
+- **A failed sensor is a soft failure:** the others carry on, and it is tried again at the next sample. The first failure, a change of reason and the recovery are logged. Hard faults (SD, RTC) are unchanged.
+
+**Table 4: Data types and failure reasons**
+
+| Sensor | data_type | Failure reasons |
+|---|---|---|
+| thermistor | temp_c, ratio | nack, timeout, bus, excitation (A0 outside 3.1 to 3.5 V or moving more than 10 mV), open (ratio over 0.98), short (under 0.02) |
+| sht45 | temp_c, rh_pct | nack, timeout, bus, crc, range (outside -40 to 125 °C, or humidity more than 5 % outside 0 to 100 %) |
+| bmp388 | temp_c, pressure_pa | nack, timeout, bus, chip_id, reset, not_ready, range (outside -40 to 85 °C or 300 to 1250 hPa) |
+
+The ratio is kept so a later calibration of the thermistor can be applied to past data.
+
+- **Console:** `status` has a line per sensor with its last values and stamp, or its failure and how many readings in a row have failed. `read` takes one reading of all three now and prints it (refused while the clock is unset).
+- **Tested (2026-11-06):** all three read, the thermistor about 0.1 °C below the SHT45. CAT5 #2 out: thermistor `open`, SHT45 `nack`, BMP388 still reading. CAT5 #1 out: thermistor and SHT45 `nack`. BMP388 pulled with the power off: `nack`, the others reading. Each recovered at the first reading after it was reconnected.
+
 ## Open items
 
 - **Clock test, remediation:** set the oscillator-stop flag (DS3231 battery out with the board unpowered), restart with an empty card, and check the first ack sets the time and clears the flag. Skipped: needs the board out of the warm box; do it next time it's removed.
@@ -80,5 +102,7 @@ Recommended: commands in the ack, unless replies within seconds are needed.
 - **Clock drift:** the resync itself is tested (below). How far the ESP32 drifts in a real hour shows in the hourly `resynced from the DS3231` log line and in the ack offset; check it after a few days of normal running.
 - **Clock test, `clock report`:** with an offset over 50 ms, check `report` leaves the DS3231 alone. Not yet run: after the first correction there was no offset that large to test with.
 - **SD test, not-empty card:** with files on the card, `status` should say `not empty at boot`. Suspended until the logger writes to the card.
-- **Write the ADS1115 code** to Table 1. Read A0, A1, A0 and average the two A0 readings, so the ratio holds even if the excitation moves between readings. Then run the noise test in WIRING.md (build step 3) with WiFi idle and with WiFi plus SD writes.
+- **Thermistor noise test:** the noise test in WIRING.md (build step 3), with WiFi idle and with WiFi plus SD writes (`ads1115-probe` does both).
+- **Partition table (separate project):** the app is 975 KB of a 1 MB partition, and the flash is 4 MB. Use a custom table with a single 3 MB app, which leaves room for OTA later, and keep the NVS offset so the settings survive.
+- **Alerting (separate project):** a sensor failure or hard fault shows only on the console and in logserv's output. A way to be told (email, phone) is still to be chosen.
 - **Keepalive:** if the firmware ever moves from UDP status lines to MQTT, set the keepalive longer than any quiet period. The broker drops a session after 1.5 times the keepalive with no traffic.

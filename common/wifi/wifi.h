@@ -12,7 +12,8 @@
 // assigned or timeout_ms passes. Returns 0 when connected; -1 on timeout,
 // with WiFi still trying in the background (poll wifi_is_connected()); -2 if
 // WiFi setup itself failed (step and reason logged), in which case WiFi is not
-// running and the caller should carry on without it. Never restarts the
+// running and the caller should carry on without it; -3 at once if ssid is
+// empty: WiFi is running but idle until wifi_set_credentials() names a network. Never restarts the
 // board. After any later disconnect it reconnects on its own, retrying once a
 // second.
 // Each connect scans every channel and joins the strongest access point

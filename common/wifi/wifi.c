@@ -19,13 +19,26 @@ static EventGroupHandle_t s_events;
 static esp_netif_t *s_netif;
 static volatile uint32_t s_got_ip_count;
 
+// True when the driver holds a network to join. With none set, WiFi runs but
+// stays idle until wifi_set_credentials() gives it one.
+static bool has_ssid(void)
+{
+    wifi_config_t cfg;
+    return esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK && cfg.sta.ssid[0] != '\0';
+}
+
 static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        if (has_ssid()) {
+            esp_wifi_connect();
+        }
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         const wifi_event_sta_disconnected_t *d = data;
         xEventGroupClearBits(s_events, CONNECTED_BIT);
+        if (!has_ssid()) {
+            return;
+        }
         ESP_LOGW(TAG, "disconnected (reason %d), retrying", d->reason);
         // Retry once a second so a router that is down doesn't get hammered.
         // This handler runs on the shared event task, so the wait also holds
@@ -82,6 +95,9 @@ int wifi_connect(const char *ssid, const char *pass, uint32_t timeout_ms)
     SETUP_STEP(esp_wifi_set_mode(WIFI_MODE_STA));
     SETUP_STEP(esp_wifi_set_config(WIFI_IF_STA, &cfg));
     SETUP_STEP(esp_wifi_start());
+    if (ssid[0] == '\0') {
+        return -3;                        // running, but no network to join yet
+    }
 
     EventBits_t bits = xEventGroupWaitBits(s_events, CONNECTED_BIT, pdFALSE, pdTRUE,
                                            pdMS_TO_TICKS(timeout_ms));
@@ -130,9 +146,15 @@ int wifi_set_credentials(const char *ssid, const char *pass)
     if (esp_wifi_set_config(WIFI_IF_STA, &cfg) != ESP_OK) {
         return -1;
     }
-    // Drop the current link; the disconnect handler reconnects with the new
-    // settings.
-    esp_wifi_disconnect();
+    // When connected, drop the link and the disconnect handler reconnects
+    // with the new settings. Otherwise (no network was set, or the old one
+    // can't be joined) start a connect now; an attempt already under way just
+    // makes this call fail harmlessly.
+    if (wifi_is_connected()) {
+        esp_wifi_disconnect();
+    } else {
+        esp_wifi_connect();
+    }
     return 0;
 }
 

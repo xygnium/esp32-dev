@@ -1,7 +1,7 @@
 // Stage 12c: settings that survive a restart, and a serial console, on top of
 // stage 12's WiFi push. Still no sensors.
 //
-// At boot and then every push interval (a setting, `config push`), the logger
+// At boot and then every push interval (a setting, `config interval`), the logger
 // sends a status line to the listener (logger-server/udp_listener.py) and records whether an
 // ack came back. The logger only pushes; it never listens. Push problems are
 // always printed on the serial console; successful pushes are hidden (quiet
@@ -105,8 +105,17 @@ static void push_once(const settings_t *cfg, const char *mac, uint32_t seq)
     uint32_t vin_mv = 0;
     supply_check(cfg->low_mv, &vin_mv);     // leaves 0 if no reading
 
+    if (cfg->listener_host[0] == '\0') {
+        ESP_LOGW(TAG, "seq %" PRIu32 ": listener not set; use config listener <ip> <port>", seq);
+        record(PUSH_NOT_CONNECTED, seq, NULL);
+        return;
+    }
     if (!wifi_is_connected()) {
-        ESP_LOGW(TAG, "seq %" PRIu32 ": not connected", seq);
+        if (cfg->wifi_ssid[0] == '\0') {
+            ESP_LOGW(TAG, "seq %" PRIu32 ": WiFi not set; use config wifi <ssid> <password>", seq);
+        } else {
+            ESP_LOGW(TAG, "seq %" PRIu32 ": not connected", seq);
+        }
         record(PUSH_NOT_CONNECTED, seq, NULL);
         return;
     }
@@ -161,6 +170,8 @@ void app_main(void)
     int wrc = wifi_connect(cfg.wifi_ssid, cfg.wifi_pass, CONNECT_TIMEOUT_MS);
     if (wrc == -1) {
         ESP_LOGW(TAG, "not connected after %d s; still trying", CONNECT_TIMEOUT_MS / 1000);
+    } else if (wrc == -3) {
+        ESP_LOGW(TAG, "WiFi not set; use config wifi <ssid> <password>");
     } else if (wrc == -2) {
         // Carry on: later stages keep logging to the SD card without WiFi.
         ESP_LOGE(TAG, "WiFi setup failed; continuing without WiFi");
@@ -173,7 +184,7 @@ void app_main(void)
     wifi_mac_str(mac, sizeof(mac));
 
     // Push once at boot, then every push interval. The interval is re-read on
-    // every wake, so a `config push` change also re-times the push currently
+    // every wake, so a `config interval` change also re-times the push currently
     // being waited for (pushing at once if it is now overdue).
     uint32_t seq = 0;
     bool first = true;

@@ -8,8 +8,6 @@
 #include "nvs.h"
 #include "nvs_flash.h"
 
-#include "wifi_secrets.h"
-
 static const char *TAG = "settings";
 
 #define NVS_NAMESPACE "ambient"
@@ -32,13 +30,9 @@ static bool s_nvs_ok;
 
 static void set_defaults(settings_t *s)
 {
-    memset(s, 0, sizeof(*s));
-    strlcpy(s->wifi_ssid, WIFI_SSID, sizeof(s->wifi_ssid));
-    strlcpy(s->wifi_pass, WIFI_PASS, sizeof(s->wifi_pass));
-    strlcpy(s->listener_host, LISTENER_HOST, sizeof(s->listener_host));
-    s->listener_port = LISTENER_PORT;
-    s->push_s = 3600;                     // hourly; set faster during development
-    s->sample_s = 60;                     // user keeps it equal to the attic logger's rate by hand
+    memset(s, 0, sizeof(*s));             // WiFi and listener: empty, not set
+    s->sample_s = 120;
+    s->push_s = 3600;                     // hourly, 30 samples
     s->window_start = 0;                  // 00:00-24:00 UTC: always, until a window is
     s->window_end = SETTINGS_DAY_MIN;     // set; not enforced before stage 22
     s->clock_auto = true;                 // dev10's clock is internet-synced, so trust the ack
@@ -47,16 +41,28 @@ static void set_defaults(settings_t *s)
 
 // --- validation: NULL when valid, else the reason ---
 
-static const char *check_push(uint32_t v)
-{
-    return (v < SETTINGS_PUSH_MIN_S || v > SETTINGS_PUSH_MAX_S)
-               ? "push interval must be 10 s to 24 h" : NULL;
-}
-
 static const char *check_sample(uint32_t v)
 {
     return (v < SETTINGS_SAMPLE_MIN_S || v > SETTINGS_SAMPLE_MAX_S)
-               ? "sample interval must be 1 s to 1 h" : NULL;
+               ? "sample interval must be 15 s to 1 h" : NULL;
+}
+
+// The push interval on its own; check_interval() checks it against the sample.
+static const char *check_push(uint32_t v)
+{
+    return (v < SETTINGS_SAMPLE_MIN_S || v > SETTINGS_PUSH_MAX_S)
+               ? "push interval must be 15 s to 24 h" : NULL;
+}
+
+static const char *check_interval(uint32_t sample, uint32_t push)
+{
+    const char *bad = check_sample(sample);
+    if (!bad) bad = check_push(push);
+    if (bad) return bad;
+    if (push < sample) {
+        return "push interval must not be shorter than the sample interval";
+    }
+    return push % sample ? "push interval must be a whole multiple of the sample interval" : NULL;
 }
 
 static const char *check_window(uint16_t start, uint16_t end)
@@ -149,8 +155,8 @@ static void load_saved(void)
         return;                           // nothing saved yet
     }
 
-    load_u32(h, K_PUSH, &s_cur.push_s, check_push);
     load_u32(h, K_SAMPLE, &s_cur.sample_s, check_sample);
+    load_u32(h, K_PUSH, &s_cur.push_s, check_push);
     load_u32(h, K_LOWV, &s_cur.low_mv, check_low_mv);
 
     uint16_t ws, we;
@@ -170,27 +176,33 @@ static void load_saved(void)
 
     char host[sizeof(s_cur.listener_host)];
     uint16_t port;
-    if (load_str(h, K_HOST, host, sizeof(host)) && nvs_get_u16(h, K_PORT, &port) == ESP_OK) {
+    // An empty saved host means "not set": saved along with the other settings
+    //   before a listener was given, so no warning.
+    if (load_str(h, K_HOST, host, sizeof(host)) && host[0] != '\0'
+        && nvs_get_u16(h, K_PORT, &port) == ESP_OK) {
         if (check_host(host) == NULL && check_port(port) == NULL) {
             strlcpy(s_cur.listener_host, host, sizeof(s_cur.listener_host));
             s_cur.listener_port = port;
         } else {
-            ESP_LOGW(TAG, "saved listener invalid; using default");
+            ESP_LOGW(TAG, "saved listener invalid; listener not set");
         }
     }
 
     char ssid[sizeof(s_cur.wifi_ssid)], pass[sizeof(s_cur.wifi_pass)];
-    if (load_str(h, K_SSID, ssid, sizeof(ssid)) && load_str(h, K_PASS, pass, sizeof(pass))) {
+    if (load_str(h, K_SSID, ssid, sizeof(ssid)) && ssid[0] != '\0'
+        && load_str(h, K_PASS, pass, sizeof(pass))) {
         if (check_wifi(ssid, pass) == NULL) {
             strlcpy(s_cur.wifi_ssid, ssid, sizeof(s_cur.wifi_ssid));
             strlcpy(s_cur.wifi_pass, pass, sizeof(s_cur.wifi_pass));
         } else {
-            ESP_LOGW(TAG, "saved WiFi settings invalid; using default");
+            ESP_LOGW(TAG, "saved WiFi settings invalid; WiFi not set");
         }
     }
 
     nvs_close(h);
 }
+
+static const char *save_locked(void);
 
 int settings_init(void)
 {
@@ -213,6 +225,24 @@ int settings_init(void)
     }
     s_nvs_ok = true;
     load_saved();
+
+    // Saved by older firmware, which set the two separately: make the push
+    // interval the next whole multiple of the sample interval (within 24 h),
+    // and save the fix so it's reported once.
+    if (check_interval(s_cur.sample_s, s_cur.push_s) != NULL) {
+        uint32_t s = s_cur.sample_s;
+        uint32_t p = (s_cur.push_s + s - 1) / s * s;
+        if (p > SETTINGS_PUSH_MAX_S) {
+            p = SETTINGS_PUSH_MAX_S / s * s;
+        }
+        ESP_LOGW(TAG, "saved push interval %lu s isn't a multiple of the %lu s sample interval; "
+                 "now %lu s", (unsigned long)s_cur.push_s, (unsigned long)s, (unsigned long)p);
+        s_cur.push_s = p;
+        const char *r = save_locked();
+        if (r) {
+            ESP_LOGW(TAG, "%s", r);
+        }
+    }
     return 0;
 }
 
@@ -259,23 +289,13 @@ static const char *save_locked(void)
     return NULL;
 }
 
-const char *settings_set_push(uint32_t seconds)
+const char *settings_set_interval(uint32_t sample_s, uint32_t push_s)
 {
-    const char *bad = check_push(seconds);
+    const char *bad = check_interval(sample_s, push_s);
     if (bad) return bad;
     xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_cur.push_s = seconds;
-    const char *r = save_locked();
-    xSemaphoreGive(s_lock);
-    return r;
-}
-
-const char *settings_set_sample(uint32_t seconds)
-{
-    const char *bad = check_sample(seconds);
-    if (bad) return bad;
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_cur.sample_s = seconds;
+    s_cur.sample_s = sample_s;
+    s_cur.push_s = push_s;
     const char *r = save_locked();
     xSemaphoreGive(s_lock);
     return r;

@@ -115,6 +115,15 @@ static void print_duration(uint32_t s)
     }
 }
 
+static void print_listener(const settings_t *cfg)
+{
+    if (cfg->listener_host[0] == '\0') {
+        printf("listener   not set (config listener <ip> <port>)\n");
+    } else {
+        printf("listener   %s:%u\n", cfg->listener_host, cfg->listener_port);
+    }
+}
+
 // Print the setter's result: NULL means done.
 static int report(const char *err)
 {
@@ -158,12 +167,14 @@ static int cmd_status(int argc, char **argv)
         wifi_rssi(&rssi);
         printf("wifi       connected to %s, rssi %d dBm, ap %s, ip %s, reconnects %" PRIu32 "\n",
                cfg.wifi_ssid, rssi, ap, ip, wifi_reconnect_count());
+    } else if (cfg.wifi_ssid[0] == '\0') {
+        printf("wifi       not set (config wifi <ssid> <password>)\n");
     } else {
         printf("wifi       not connected (network %s), reconnects %" PRIu32 "\n",
                cfg.wifi_ssid, wifi_reconnect_count());
     }
 
-    printf("listener   %s:%u\n", cfg.listener_host, cfg.listener_port);
+    print_listener(&cfg);
     printf("push       every ");
     print_duration(cfg.push_s);
     printf(", next in %" PRIu32 " s\n", ps.next_in_s);
@@ -216,26 +227,30 @@ static void config_print(void)
 {
     settings_t cfg;
     settings_get(&cfg);
-    printf("push       ");
-    print_duration(cfg.push_s);
-    printf("\nsample     ");
+    printf("interval   sample ");
     print_duration(cfg.sample_s);
-    printf("   (used once sensors exist)\n");
-    printf("window     %02u:%02u-%02u:%02u UTC   (enforced from stage 22)\n",
+    printf(", push ");
+    print_duration(cfg.push_s);
+    printf("   (sampling not used yet)\n");
+    printf("window     %02u:%02u-%02u:%02u UTC   (not used yet)\n",
            cfg.window_start / 60, cfg.window_start % 60, cfg.window_end / 60, cfg.window_end % 60);
-    printf("clock      %s   (used from stage 22)\n", cfg.clock_auto ? "auto" : "report");
-    printf("listener   %s:%u\n", cfg.listener_host, cfg.listener_port);
+    printf("clock      %s   (not used yet)\n", cfg.clock_auto ? "auto" : "report");
+    print_listener(&cfg);
     printf("lowv       %lu.%02lu V   (supply-low threshold)\n", (unsigned long)(cfg.low_mv / 1000),
            (unsigned long)(cfg.low_mv % 1000 / 10));
-    printf("wifi       %s, password %s\n", cfg.wifi_ssid, cfg.wifi_pass[0] ? "set (hidden)" : "none");
+    if (cfg.wifi_ssid[0] == '\0') {
+        printf("wifi       not set\n");
+    } else {
+        printf("wifi       %s, password %s\n", cfg.wifi_ssid, cfg.wifi_pass[0] ? "set (hidden)" : "none");
+    }
 }
 
 static int config_usage(void)
 {
     printf("usage:\n"
            "  config get\n"
-           "  config push <n>[s|m|h]        push interval, bare number = minutes (10 s-24 h)\n"
-           "  config sample <n>[s|m]        sample interval, bare number = seconds (1 s-1 h)\n"
+           "  config interval <sample> <push>  e.g. 2m 1h; units s, m or h, bare number = seconds.\n"
+           "                                sample 15 s-1 h; push up to 24 h, a whole multiple of sample\n"
            "  config window <HH:MM> <HH:MM> push window in UTC; end before start wraps midnight\n"
            "  config clock auto|report      let the ack's time correct the clock, or only report\n"
            "  config listener <ip> <port>   where to push\n"
@@ -255,23 +270,17 @@ static int cmd_config(int argc, char **argv)
         config_print();
         return 0;
     }
-    if (strcmp(what, "push") == 0 && argc == 3) {
-        uint32_t s;
-        if (!parse_duration(argv[2], 60, &s)) {
-            printf("not a duration: %s\n", argv[2]);
-            return 1;
+    if (strcmp(what, "interval") == 0 && argc == 4) {
+        uint32_t sample, push;
+        for (int i = 2; i < 4; i++) {
+            if (!parse_duration(argv[i], 1, i == 2 ? &sample : &push)) {
+                printf("not a duration: %s\n", argv[i]);
+                return 1;
+            }
         }
-        int rc = report(settings_set_push(s));
+        int rc = report(settings_set_interval(sample, push));
         ambient_wake();               // re-plan the next push with the new interval
         return rc;
-    }
-    if (strcmp(what, "sample") == 0 && argc == 3) {
-        uint32_t s;
-        if (!parse_duration(argv[2], 1, &s)) {
-            printf("not a duration: %s\n", argv[2]);
-            return 1;
-        }
-        return report(settings_set_sample(s));
     }
     if (strcmp(what, "window") == 0 && argc == 4) {
         uint16_t a, b;
@@ -365,7 +374,7 @@ int console_start(void)
         { .command = "status", .help = "Running time, WiFi, listener, push results", .func = cmd_status },
         { .command = "info",   .help = "Firmware version, build date, MAC address",  .func = cmd_info },
         { .command = "config", .help = "Show or change settings; 'config' alone lists the forms",
-          .hint = "get | push | sample | window | clock | listener | lowv | wifi ...", .func = cmd_config },
+          .hint = "get | interval | window | clock | listener | lowv | wifi ...", .func = cmd_config },
         { .command = "push",   .help = "Push now, outside the schedule",              .func = cmd_push },
         { .command = "quiet",  .help = "Hide (on) or show (off) successful pushes on this console; on at boot",
           .hint = "[on|off]", .func = cmd_quiet },

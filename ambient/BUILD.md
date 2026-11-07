@@ -8,7 +8,7 @@ How the `ambient` firmware is built, where it sits in flash, and what uses the m
 
 | Region | Used | Size | Free |
 |---|---|---|---|
-| App partition (flash) | 975 KB | 1024 KB | 72 KB |
+| App partition (flash) | 975 KB | 3072 KB | 2097 KB (was 1024 KB with 72 KB free; see [Flash layout](#flash-layout)) |
 | IRAM | 103 KB (78 %) | 128 KB | 28 KB |
 | DRAM, static | 39 KB (22 %) | 177 KB | 141 KB, left for the heap |
 | RTC slow | 64 B | 8 KB | 8 KB |
@@ -42,14 +42,14 @@ The 52 small components are each under 14 KB:
 
 **What this means:**
 - ESP-IDF is about 957 KB, 98 % of the image. Our code is 18 KB.
-- A WiFi project with nothing else is about 800 KB (an estimate, not measured), which leaves about 200 KB of the default 1 MB partition. The extra IDF parts this firmware uses (console, FAT and SD, SPI and I2C drivers, more stdio) add about another 130 KB, so only 72 KB is left.
+- A WiFi project with nothing else is about 800 KB (an estimate, not measured), which leaves about 200 KB of the default 1 MB partition. The extra IDF parts this firmware uses (console, FAT and SD, SPI and I2C drivers, more stdio) add about another 130 KB, so only 72 KB was left in the default partition. That's why the firmware now uses a custom table.
 - New code of our own is cheap. Each new IDF component pulled in costs far more.
 
 ## Flash layout
 
-The ESP32 here has 4 MB of flash (`CONFIG_ESPTOOLPY_FLASHSIZE_4MB` in `sdkconfig.defaults`). The firmware uses IDF's default single-app table (`partitions_singleapp.csv`).
+The ESP32 here has 4 MB of flash (`CONFIG_ESPTOOLPY_FLASHSIZE_4MB` in `sdkconfig.defaults`). Since 2026-11-07 the firmware uses its own table, `partitions.csv`: IDF's default single-app table (`partitions_singleapp.csv`) with the app grown from 1 MB to 3 MB.
 
-**Table 3: Current flash layout**
+**Table 3: Flash layout**
 
 | Offset | Contents | Size |
 |---|---|---|
@@ -57,28 +57,28 @@ The ESP32 here has 4 MB of flash (`CONFIG_ESPTOOLPY_FLASHSIZE_4MB` in `sdkconfig
 | 0x8000 | Partition table (binary) | 3 KB |
 | 0x9000 | `nvs`, the settings | 24 KB |
 | 0xF000 | `phy_init`, RF calibration | 4 KB |
-| 0x10000 | `factory`, the app | 1 MB |
-| 0x110000 to the end | unused | about 2.9 MB |
+| 0x10000 | `factory`, the app | 3 MB (was 1 MB) |
+| 0x310000 to the end | unused | about 960 KB |
 
 **Why the default is so small:** it was chosen to run on every chip. IDF assumes a 2 MB flash unless told otherwise, and 1 MB apps also fit the two-slot OTA table on 4 MB parts. The WiFi stack has grown with each IDF release, but the default hasn't. The expected path is a custom `partitions.csv`.
 
-### Planned: custom table with a 3 MB app (separate project, not done)
+### Custom table with a 3 MB app (done 2026-11-07)
 
-1. Add `ambient/partitions.csv`, with the first two rows the same as the default so NVS stays at 0x9000:
+1. Added `ambient/partitions.csv`, with the first two rows the same as the default so NVS stays at 0x9000:
    ```
    nvs,      data, nvs,     0x9000,  0x6000,
    phy_init, data, phy,     0xf000,  0x1000,
    factory,  app,  factory, 0x10000, 3M,
    ```
-2. Add these lines to `sdkconfig.defaults`:
+2. Added these lines to `sdkconfig.defaults`:
    ```
    CONFIG_PARTITION_TABLE_CUSTOM=y
    CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
    ```
-   The existing `sdkconfig` doesn't pick up new defaults, so delete it (or set the options in `menuconfig`) and rebuild.
-3. Run `./flash.sh`. It writes the bootloader, the new table and the app. NVS isn't touched unless someone runs `erase-flash`.
+   The existing `sdkconfig` doesn't pick up new defaults, so it was deleted and rebuilt. Apart from the partition options, the regenerated file matched the old one, so no `menuconfig` changes were lost.
+3. Ran `./flash.sh`. It writes the bootloader, the new table and the app. NVS isn't touched unless someone runs `erase-flash`. After the flash the logger booted with its settings intact (WiFi, listener, intervals).
 
-The app goes from 1 MB to 3 MB, and about 960 KB at the end stays unused. For OTA later, the 3 MB app would be replaced by `otadata` and two app slots of about 1.5 MB each. That means repartitioning again, but NVS stays put.
+The app went from 1 MB to 3 MB (69 % free), and about 960 KB at the end stays unused. For OTA later, the 3 MB app would be replaced by `otadata` and two app slots of about 1.5 MB each. That means repartitioning again, but NVS stays put.
 
 Keeping NVS in place means the settings survive: WiFi SSID and password, the listener, the intervals, `clock auto/report` and the test flags. These are set only on the console now. If NVS moved, they would have to be typed in again. It's a small saving, but it costs nothing.
 

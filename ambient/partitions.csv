@@ -1,0 +1,6 @@
+# Name,   Type, SubType, Offset,  Size
+# nvs and phy_init match the IDF default table, so the saved settings
+# survive. Single 3 MB app; about 960 KB at the end of the 4 MB flash is free.
+nvs,      data, nvs,     0x9000,  0x6000,
+phy_init, data, phy,     0xf000,  0x1000,
+factory,  app,  factory, 0x10000, 3M,

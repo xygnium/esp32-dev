@@ -8,3 +8,6 @@ CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
 # Custom partition table: one 3 MB app (see BUILD.md). NVS stays at 0x9000.
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+# Main loop stack: sampling, float formatting and FatFs writes (datalog.c).
+# The default 3584 is too tight; `status` shows the headroom.
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

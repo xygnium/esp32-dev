@@ -16,12 +16,17 @@
 
 #include "ambient.h"
 #include "clock.h"
+#include "datalog.h"
 #include "fault.h"
 #include "sd.h"
 #include "sensors.h"
 #include "settings.h"
 #include "supply.h"
 #include "wifi.h"
+
+#define CONSOLE_STACK 6144
+
+static TaskHandle_t s_console_task;     // known from the first `status`
 
 static const char *TAG = "console";
 
@@ -209,9 +214,23 @@ static int cmd_read(int argc, char **argv)
         printf("clock not set: readings would have no time stamp\n");
         return 1;
     }
-    sensors_sample();
+    sensors_sample(NULL);                 // a diagnostic: not logged
     print_sensors();
     return 0;
+}
+
+// tail [file] [lines]: the end of a file on the card, or the file list.
+static int cmd_tail(int argc, char **argv)
+{
+    if (argc == 1) {
+        return datalog_list() == 0 ? 0 : 1;
+    }
+    uint32_t lines = 10;
+    if (argc > 3 || (argc == 3 && (!parse_u32(argv[2], &lines) || lines < 1 || lines > 200))) {
+        printf("usage: tail [file [lines]]   (lines 1 to 200, default 10; no file: list the card)\n");
+        return 1;
+    }
+    return datalog_tail(argv[1], (int)lines) == 0 ? 0 : 1;
 }
 
 static int cmd_status(int argc, char **argv)
@@ -307,6 +326,35 @@ static int cmd_status(int argc, char **argv)
     } else {
         printf("sd         mounted (size unknown), %s at boot\n", sd.empty ? "empty" : "not empty");
     }
+    datalog_info_t dl;
+    datalog_get_info(&dl);
+    if (dl.low) {
+        printf("           LOW: under 10 %% free\n");
+    }
+    if (dl.file[0]) {
+        printf("log        %s, %" PRIu32 " bytes; %" PRIu32 " rows, %" PRIu32 " events since boot",
+               dl.file, dl.file_bytes, dl.rows, dl.events);
+    } else {
+        printf("log        nothing written yet; %" PRIu32 " events since boot", dl.events);
+    }
+    if (dl.held) {
+        printf(", %" PRIu32 " held for the clock", dl.held);
+    }
+    if (dl.dropped) {
+        printf(", %" PRIu32 " lost", dl.dropped);
+    }
+#ifdef AMBIENT_TEST_FAULTS
+    if (datalog_test_minute_files_on()) {
+        printf(" (TEST: a file per minute)");
+    }
+#endif
+    printf("\n");
+    if (!s_console_task) {
+        s_console_task = xTaskGetCurrentTaskHandle();   // status runs in the console task
+    }
+    printf("stack      lowest free since boot: main %u B of %u, console %u B of %u\n",
+           (unsigned)uxTaskGetStackHighWaterMark(ambient_main_task()), (unsigned)CONFIG_ESP_MAIN_TASK_STACK_SIZE,
+           (unsigned)uxTaskGetStackHighWaterMark(s_console_task), (unsigned)CONSOLE_STACK);
     printf("settings   %s\n", settings_saved_to_flash() ? "saved in flash"
                                                        : "NOT saved: NVS unavailable, defaults in use");
     return 0;
@@ -334,7 +382,8 @@ static int cmd_info(int argc, char **argv)
 // Raise a fault through the same path as a real one.
 static int cmd_test(int argc, char **argv)
 {
-    static const char *const sd_reasons[] = { "missing", "mount_failed", "not_responding", NULL };
+    static const char *const sd_reasons[] = { "missing", "mount_failed", "not_responding",
+                                              "full", "write_failed", NULL };
     static const char *const rtc_reasons[] = { "missing", "invalid", "not_responding", NULL };
     if (argc == 4 && strcmp(argv[1], "fault") == 0) {
         bool sd = strcmp(argv[2], "sd") == 0, rtc = strcmp(argv[2], "rtc") == 0;
@@ -364,10 +413,29 @@ static int cmd_test(int argc, char **argv)
         ambient_wake();
         return 0;
     }
-    printf("usage: test fault sd missing|mount_failed|not_responding\n"
+    if (argc == 2 && strcmp(argv[1], "rtc-stop") == 0) {
+        if (clock_test_stop_on_battery() != 0) {
+            printf("DS3231 didn't answer\n");
+            return 1;
+        }
+        printf("DS3231 oscillator set to stop on the battery. Unplug the power for a few\n"
+               "seconds and plug it back in: the stop flag is then really set. The next\n"
+               "boot clears the setting. Not a fault until then\n");
+        return 0;
+    }
+    if (argc == 3 && strcmp(argv[1], "dayfile") == 0
+        && (strcmp(argv[2], "minute") == 0 || strcmp(argv[2], "day") == 0)) {
+        bool minute = strcmp(argv[2], "minute") == 0;
+        datalog_test_minute_files(minute);
+        printf("a readings file per %s until reboot\n", minute ? "UTC minute" : "UTC day");
+        return 0;
+    }
+    printf("usage: test fault sd missing|mount_failed|not_responding|full|write_failed\n"
            "       test fault rtc missing|invalid|not_responding\n"
            "       test rtc-absent on|off   (at boot, look for the DS3231 at an unused address)\n"
-           "       test resync <seconds>    (resync from the DS3231 this often, 10 s or more, until reboot)\n");
+           "       test resync <seconds>    (resync from the DS3231 this often, 10 s or more, until reboot)\n"
+           "       test dayfile minute|day  (a readings file per UTC minute or day, until reboot)\n"
+           "       test rtc-stop            (DS3231 stops on the battery: a power cut sets its stop flag)\n");
     return 1;
 }
 #endif
@@ -528,12 +596,15 @@ int console_start(void)
           .hint = "get | interval | window | clock | listener | lowv | wifi ...", .func = cmd_config },
         { .command = "push",   .help = "Push now, outside the schedule",              .func = cmd_push },
         { .command = "read",   .help = "Read the sensors now and print the readings", .func = cmd_read },
+        { .command = "tail",   .help = "Last lines of a file on the SD card; alone, list the card's files",
+          .hint = "[file [lines]]", .func = cmd_tail },
         { .command = "quiet",  .help = "Hide (on) or show (off) successful pushes on this console; on at boot",
           .hint = "[on|off]", .func = cmd_quiet },
         { .command = "reboot", .help = "Restart the logger; settings are kept",       .func = cmd_reboot },
 #ifdef AMBIENT_TEST_FAULTS
         { .command = "test",   .help = "TEST BUILD: raise a hard fault as if it were real",
-          .hint = "fault sd|rtc <reason> | rtc-absent on|off | resync <s>", .func = cmd_test },
+          .hint = "fault sd|rtc <reason> | rtc-absent on|off | resync <s> | dayfile minute|day | rtc-stop",
+          .func = cmd_test },
 #endif
     };
 
@@ -545,6 +616,7 @@ int console_start(void)
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t rc = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     rc.prompt = "ambient>";
+    rc.task_stack_size = CONSOLE_STACK;   // `read` and event logging write to the card
     if (err == ESP_OK) err = esp_console_new_repl_stdio(&rc, &repl);
     if (err == ESP_OK) err = esp_console_start_repl(repl);
     if (err != ESP_OK) {

@@ -11,6 +11,7 @@
 #include "esp_rom_sys.h"
 #include "esp_timer.h"
 
+#include "datalog.h"
 #include "ds3231.h"
 #include "fault.h"
 #include "sd.h"
@@ -89,6 +90,7 @@ static int sync_from_ds3231(bool step)
         settimeofday(&tv, NULL);
         if (!step) {
             ESP_LOGW(TAG, "ESP32 clock was %lld ms off the DS3231: stepped", (long long)(offset / 1000));
+            datalog_event("clock", "stepped", "%+lld ms", (long long)(offset / 1000));
         }
     } else {
         struct timeval d = { .tv_sec = offset / 1000000, .tv_usec = offset % 1000000 };
@@ -138,6 +140,17 @@ int clock_init(void)
         fault_raise(FAULT_RTC, "missing");
         return -1;
     }
+    // The oscillator must run on the battery, or the clock stops at every
+    // power cut. Only `test rtc-stop` sets this; a stray set is cleared here.
+    bool eosc;
+    if (ds3231_get_eosc(&eosc) != 0 || (eosc && ds3231_set_eosc(false) != 0)) {
+        not_responding();
+        return -1;
+    }
+    if (eosc) {
+        ESP_LOGW(TAG, "DS3231 was set to stop its oscillator on the battery; cleared");
+        datalog_event("clock", "eosc_cleared", "%s", "was set");
+    }
     struct tm t;
     bool osf;
     if (ds3231_read(&t, &osf) != 0) {
@@ -163,6 +176,7 @@ int clock_init(void)
     char now[40];
     clock_now_str(now, sizeof now);
     ESP_LOGI(TAG, "set from the DS3231: %s", now);
+    datalog_event("clock", "set", "from DS3231");
     return 0;
 }
 
@@ -251,12 +265,19 @@ void clock_on_ack(const char *reply, int64_t rtt_us, bool auto_correct)
     clock_now_str(now, sizeof now);
     if (set) {
         ESP_LOGI(TAG, "DS3231 corrected by %+lld ms from the ack; now %s", (long long)(offset / 1000), now);
+        datalog_event("clock", "corrected", "%+lld ms", (long long)(offset / 1000));
     } else {
         ESP_LOGI(TAG, "DS3231 set from the ack and its stop flag cleared; now %s", now);
+        datalog_event("clock", "set_from_ack", "stop flag cleared");
     }
 }
 
 #ifdef AMBIENT_TEST_FAULTS
+int clock_test_stop_on_battery(void)
+{
+    return ds3231_set_eosc(true);
+}
+
 void clock_test_set_resync(uint32_t seconds)
 {
     s_resync_us = (int64_t)seconds * 1000000;

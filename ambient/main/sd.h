@@ -34,4 +34,12 @@ void sd_get_info(sd_info_t *out);
 // True when the card was empty at boot (see sd_info_t.empty).
 bool sd_is_empty(void);
 
+// True when the card is mounted and there is no SD fault.
+bool sd_usable(void);
+
+// One user of the card at a time (health check, size query, logging). Not
+// recursive: don't call sd_check or sd_get_info while holding it.
+void sd_lock(void);
+void sd_unlock(void);
+
 #endif

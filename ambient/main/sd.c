@@ -23,12 +23,12 @@ static const char *TAG = "sd";
 
 static sdmmc_card_t *s_card;
 static bool s_empty;
-// The health check (main loop) and the size query (console) both talk to the
-// card; one at a time.
+// The health check and logging (main loop), the size query (console) and
+// event logging (any task) all talk to the card; one at a time.
 static SemaphoreHandle_t s_lock;
 
 // Empty: nothing in the root but the folder Windows makes when formatting.
-// Long file names are off, so FAT reports that folder by its short name.
+// Its short name is checked too, in case long file names are ever turned off.
 static bool root_is_empty(void)
 {
     DIR *d = opendir(SD_MOUNT_POINT);
@@ -123,4 +123,20 @@ void sd_get_info(sd_info_t *out)
 bool sd_is_empty(void)
 {
     return s_card != NULL && s_empty;
+}
+
+bool sd_usable(void)
+{
+    fault_src_t src;
+    return s_card != NULL && !(fault_get(&src, NULL) && src == FAULT_SD);
+}
+
+void sd_lock(void)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+}
+
+void sd_unlock(void)
+{
+    xSemaphoreGive(s_lock);
 }

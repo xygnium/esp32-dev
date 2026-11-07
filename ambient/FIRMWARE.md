@@ -1,6 +1,6 @@
 # Ambient firmware
 
-Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The build, flash layout and memory use are in [BUILD.md](BUILD.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py` in the `logger-server` repo, which also holds the protocol description), mounts and checks the SD card, keeps time from the DS3231 (see [Time](#time)), and samples the sensors (see [Sensors](#sensors)). It doesn't log or push the readings yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
+Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The build, flash layout and memory use are in [BUILD.md](BUILD.md), and the regression tests in [TESTS.md](TESTS.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py` in the `logger-server` repo, which also holds the protocol description), mounts and checks the SD card, keeps time from the DS3231 (see [Time](#time)), and samples the sensors (see [Sensors](#sensors)). It doesn't log or push the readings yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
 
 The reading scheme (ratiometric, pulsed excitation on GPIO25, A0 for the excitation and A1 for the tap) is in [How the thermistor is read](WIRING.md#how-the-thermistor-is-read).
 
@@ -50,7 +50,15 @@ Recommended: commands in the ack, unless replies within seconds are needed.
 
 ## SD card and hard faults
 
-- **Mounting:** at boot, over SPI (VSPI: SCK 18, MISO 19, MOSI 23, CS 4, 4 MHz), at `/sdcard`. The logger **never formats** a card. Cards are formatted on a PC (FAT32).
+- **Mounting:** at boot, over SPI (VSPI: SCK 18, MISO 19, MOSI 23, CS 4, 4 MHz), at `/sdcard`. The logger **never formats** a card. Cards are formatted on a PC (FAT32), see [Formatting a card](#formatting-a-card).
+- <a id="formatting-a-card"></a>**Formatting a card** on Linux. Find the card by its size first: the wrong device wipes a disk. A reader with no card shows 0 B. Below the card is `sdc`.
+  ```
+  lsblk
+  sudo umount /dev/sdc1
+  sudo parted /dev/sdc --script -- mklabel msdos mkpart primary fat32 1MiB 100%
+  sudo mkfs.vfat -F32 -n AMBIENT /dev/sdc1
+  ```
+  Ask for FAT32 (`-F32`): a format tool may pick FAT16 for a small card, and its root holds only 512 entries, about 250 day files.
 - **Health check:** at every sample interval the logger asks the card for its status (`sdmmc_get_status`). That's read-only, so nothing is written. Once logging exists, each sample's write is the check.
 - **Empty card:** at boot the logger notes whether the root holds anything except `System Volume Information` (Windows makes it when formatting). The clock uses this to recognise a remediated restart (see [Time](#time)).
 - **Hard fault:** a missing card (`missing`), a card that doesn't mount (`mount_failed`) or a card that stops answering (`not_responding`) stops normal work. There is no carrying on without the card.

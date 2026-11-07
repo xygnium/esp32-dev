@@ -1,5 +1,7 @@
 #include "supply.h"
 
+#include "datalog.h"
+
 #include "freertos/FreeRTOS.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
@@ -136,11 +138,13 @@ int supply_check(uint32_t low_mv, uint32_t *vin_mv)
     portEXIT_CRITICAL(&s_mux);
 
     // Shown regardless of quiet mode: these are problems (and their end).
-    // The SD card's problem log takes these entries from stage 21.
+    // Both are events in the SD card's events file too.
     if (now_low && !was_low) {
         ESP_LOGW(TAG, "supply low: %lu mV (threshold %lu mV)", (unsigned long)vin, (unsigned long)low_mv);
+        datalog_event("supply", "low", "%lu mV", (unsigned long)vin);
     } else if (!now_low && was_low) {
         ESP_LOGW(TAG, "supply recovered: %lu mV", (unsigned long)vin);
+        datalog_event("supply", "recovered", "%lu mV", (unsigned long)vin);
     }
     *vin_mv = vin;
     return 0;

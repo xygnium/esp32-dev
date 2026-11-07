@@ -1,6 +1,6 @@
 // Settings that survive a restart, a serial console, WiFi pushes, the SD card,
-// the clock (clock.c) and sensor sampling (sensors.c). No logging yet: the
-// readings are kept in memory and shown by `status` and `read`.
+// the clock (clock.c), sensor sampling (sensors.c) and logging to the card
+// (datalog.c). Pushes don't carry the logged data yet (project 5).
 //
 // At boot and then every push interval (a setting, `config interval`), the logger
 // sends a status line to the listener (logger-server/udp_listener.py) and records whether an
@@ -18,11 +18,14 @@
 // low-supply threshold (supply.c); from stage 20 it's read at every sample.
 // A missing reply is counted and logged; nothing is resent.
 //
-// SD card (sd.c): mounted at boot, never formatted, and checked at every
-// sample interval. A missing or failing card is a hard fault (fault.c):
-// normal pushes stop, and the fault is printed on the console and pushed to
-// the listener at once and then every push interval, as
-//   fault sd=<missing|mount_failed|not_responding> seq=<n> up=<s> mac=<own MAC>
+// SD card (sd.c): mounted at boot, never formatted. Each sample is written
+// to it (datalog.c), and the write is the card's check; while no sample is
+// taken (clock unset) the card is asked for its status instead. A missing or
+// failing card is a hard fault (fault.c): normal pushes stop, and the fault
+// is printed on the console and pushed to the listener at once and then
+// every push interval, as
+//   fault sd=<missing|mount_failed|not_responding|full|write_failed> seq=<n>
+//         up=<s> mac=<own MAC>
 // Only a reboot clears it.
 //
 // Clock (clock.c): a DS3231 fault is a hard fault too (fault rtc=<missing|
@@ -32,8 +35,10 @@
 // time, plus half the round trip, is passed to the clock.
 //
 // Sensors (sensors.c): sampled every sample interval while the clock is set
-// and there is no hard fault. A failed sensor is a soft failure: the others
-// carry on and it is tried again at the next sample.
+// and there is no hard fault, and each sample logged to the card. A failed
+// sensor is a soft failure: the others carry on and it is tried again at the
+// next sample. Events (boot, clock, sensor failures, supply, sd low, faults)
+// go to the card's events file.
 
 #include <inttypes.h>
 #include <stdbool.h>
@@ -42,12 +47,15 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "esp_timer.h"
 
 #include "ambient.h"
 #include "clock.h"
 #include "console_cmds.h"
+#include "datalog.h"
 #include "fault.h"
 #include "sd.h"
 #include "sensors.h"
@@ -86,6 +94,11 @@ void ambient_wake(void)
     if (s_loop_task) {
         xTaskNotifyGive(s_loop_task);
     }
+}
+
+TaskHandle_t ambient_main_task(void)
+{
+    return s_loop_task;
 }
 
 void ambient_set_quiet(bool on)
@@ -190,6 +203,22 @@ static void push_once(const settings_t *cfg, const char *mac, uint32_t seq)
     }
 }
 
+static const char *reset_reason(void)
+{
+    switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:   return "power_on";
+    case ESP_RST_SW:        return "restart";
+    case ESP_RST_PANIC:     return "panic";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:       return "watchdog";
+    case ESP_RST_BROWNOUT:  return "brownout";
+    case ESP_RST_EXT:       return "external";
+    case ESP_RST_DEEPSLEEP: return "deep_sleep";
+    default:                return "other";
+    }
+}
+
 void app_main(void)
 {
     // Excitation off before anything that could take time.
@@ -207,6 +236,9 @@ void app_main(void)
     ESP_LOGW(TAG, "TEST BUILD: fault injection enabled (test fault ...); not for production");
 #endif
 
+    // Held until the clock is set, then written with its stamp worked back.
+    datalog_event("logger", "boot", "%s %s", esp_app_get_description()->version, reset_reason());
+
     // Settings first: NVS must be ready before WiFi starts, and a failure
     // here just means running on defaults.
     settings_init();
@@ -222,6 +254,7 @@ void app_main(void)
     sd_init();
     clock_init();
     sensors_init();
+    datalog_init();
 
     int wrc = wifi_connect(cfg.wifi_ssid, cfg.wifi_pass, CONNECT_TIMEOUT_MS);
     if (wrc == -1) {
@@ -261,10 +294,14 @@ void app_main(void)
         portEXIT_CRITICAL(&s_stats_mux);
 
         if (now >= check_due) {
-            sd_check();
             if (!fault_get(NULL, NULL) && clock_is_set()) {
-                sensors_sample();
+                sensor_result_t r[SENSOR_COUNT];
+                sensors_sample(r);
+                datalog_sample(r);        // the write is the card's check
+            } else {
+                sd_check();
             }
+            datalog_poll();
             last_check_us = now;
             continue;
         }
@@ -278,6 +315,7 @@ void app_main(void)
             fault_pushed = in_fault;
             push_once(&cfg, mac, seq++);
             last_push_us = esp_timer_get_time();
+            datalog_poll();                // an ack may have just set the clock
             continue;
         }
         // Sleep until the next push or check, or until the console wakes us

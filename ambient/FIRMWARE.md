@@ -1,6 +1,6 @@
 # Ambient firmware
 
-Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py` in the `logger-server` repo, which also holds the protocol description), mounts and checks the SD card, keeps time from the DS3231 (see [Time](#time)), and samples the sensors (see [Sensors](#sensors)). It doesn't log or push the readings yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
+Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The build, flash layout and memory use are in [BUILD.md](BUILD.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py` in the `logger-server` repo, which also holds the protocol description), mounts and checks the SD card, keeps time from the DS3231 (see [Time](#time)), and samples the sensors (see [Sensors](#sensors)). It doesn't log or push the readings yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
 
 The reading scheme (ratiometric, pulsed excitation on GPIO25, A0 for the excitation and A1 for the tap) is in [How the thermistor is read](WIRING.md#how-the-thermistor-is-read).
 
@@ -103,6 +103,6 @@ The ratio is kept so a later calibration of the thermistor can be applied to pas
 - **Clock test, `clock report`:** with an offset over 50 ms, check `report` leaves the DS3231 alone. Not yet run: after the first correction there was no offset that large to test with.
 - **SD test, not-empty card:** with files on the card, `status` should say `not empty at boot`. Suspended until the logger writes to the card.
 - **Thermistor noise test:** the noise test in WIRING.md (build step 3), with WiFi idle and with WiFi plus SD writes (`ads1115-probe` does both).
-- **Partition table (separate project):** the app is 975 KB of a 1 MB partition, and the flash is 4 MB. Use a custom table with a single 3 MB app, which leaves room for OTA later, and keep the NVS offset so the settings survive.
+- **Partition table (separate project):** the app is 975 KB of a 1 MB partition, and the flash is 4 MB. Use a custom table with a single 3 MB app, which leaves room for OTA later, and keep the NVS offset so the settings survive. Steps in [BUILD.md](BUILD.md#planned-custom-table-with-a-3-mb-app-separate-project-not-done).
 - **Alerting (separate project):** a sensor failure or hard fault shows only on the console and in logserv's output. A way to be told (email, phone) is still to be chosen.
 - **Keepalive:** if the firmware ever moves from UDP status lines to MQTT, set the keepalive longer than any quiet period. The broker drops a session after 1.5 times the keepalive with no traffic.

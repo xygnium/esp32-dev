@@ -18,7 +18,8 @@ One ESP32 logger reads three sensors every 2 minutes, keeps everything on its SD
 - **Readings file:** one CSV per UTC day, `YYYY-MM-DD.csv`, one row per reading: `timestamp,sensor,data_type,value,status`.
 - **Events file:** `events.csv`, one row per event: `timestamp,source,event,detail`. Events are boot, clock set or corrected, sensor fail or recover, supply low or recovered, and faults.
 - **Clock:** the DS3231 sets the ESP32 clock at boot and every hour. Each ack from logserv carries its time; if the logger is off by more than 50 ms, it corrects the DS3231.
-- **Console:** WiFi, logserv's address and the intervals are set over the USB serial console. `status` shows the current state.
+- **Console:** WiFi, logserv's address and the sample interval are set over the USB serial console. `status` shows the current state.
+- **WiFi power save** is on, except while a message waits for its ack, so the ack's time is good for the clock. Details: [FIRMWARE.md](FIRMWARE.md).
 
 ## Why one row per value
 
@@ -78,7 +79,6 @@ An event from before the clock is set has an empty timestamp.
 
 ## Not done yet
 
-- The sending above is built but not flashed, tested or committed.
 - Messages queued in RAM are lost on reboot or when the queue fills; they stay only on the card.
 - No alerting (email, phone) when something fails.
-- Leftovers: `FIRMWARE.md` and `PROTOCOL.md` describe the old messages.
+- No warning when the card is nearly full; a full card shows as `sd,fault,write_failed`.

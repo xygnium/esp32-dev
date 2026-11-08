@@ -81,4 +81,4 @@ An event from before the clock is set has an empty timestamp.
 - The sending above is built but not flashed, tested or committed.
 - Messages queued in RAM are lost on reboot or when the queue fills; they stay only on the card.
 - No alerting (email, phone) when something fails.
-- Leftovers: the console still says "push", and `FIRMWARE.md` and `PROTOCOL.md` describe the old messages.
+- Leftovers: `FIRMWARE.md` and `PROTOCOL.md` describe the old messages.

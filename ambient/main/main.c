@@ -56,7 +56,6 @@
 static const char *TAG = "ambient";
 
 static TaskHandle_t s_loop_task;
-static volatile bool s_push_now;
 static volatile bool s_quiet = true;   // quiet on at boot
 
 // Shared with the console task; guarded by s_stats_mux.
@@ -89,12 +88,6 @@ void ambient_set_quiet(bool on)
 bool ambient_quiet(void)
 {
     return s_quiet;
-}
-
-void ambient_request_push(void)
-{
-    s_push_now = true;
-    ambient_wake();
 }
 
 static void record(push_result_t r, uint32_t seq, const char *reply)
@@ -241,8 +234,7 @@ void app_main(void)
             continue;
         }
         bool waiting = datalog_next(msg);
-        if (waiting && (s_push_now || now >= retry_due)) {
-            s_push_now = false;
+        if (waiting && now >= retry_due) {
             if (send_one(&cfg, msg, seq++)) {
                 datalog_sent();
                 if (failing) {
@@ -263,7 +255,7 @@ void app_main(void)
         portEXIT_CRITICAL(&s_stats_mux);
 
         // Sleep until the next sample, clock poll or retry, or until woken
-        // (a new message, a setting changed, `push`). +1 tick so we never
+        // (a new message, a setting changed). +1 tick so we never
         // wake just short of due.
         int64_t next = check_due < clock_due ? check_due : clock_due;
         if (waiting && retry_due < next) {

@@ -283,18 +283,18 @@ static int cmd_status(int argc, char **argv)
     }
 
     print_listener(&cfg);
-    printf("push       next retry in %" PRIu32 " s\n", ps.next_in_s);
+    printf("send       next retry in %" PRIu32 " s\n", ps.next_in_s);
     if (ps.last == PUSH_NONE) {
-        printf("last push  none yet\n");
+        printf("last send  none yet\n");
     } else {
-        printf("last push  seq %" PRIu32 ": %s at uptime %" PRIu32 " s", ps.seq,
+        printf("last send  seq %" PRIu32 ": %s at uptime %" PRIu32 " s", ps.seq,
                result_name(ps.last), ps.last_uptime_s);
         if (ps.last == PUSH_OK) {
             printf(" (%s)", ps.last_reply);
         }
         printf("\n");
     }
-    printf("pushes     ok %" PRIu32 ", no reply %" PRIu32 ", send failed %" PRIu32
+    printf("sends      ok %" PRIu32 ", no reply %" PRIu32 ", send failed %" PRIu32
            ", not connected %" PRIu32 "\n",
            ps.n_ok, ps.n_no_reply, ps.n_send_failed, ps.n_not_connected);
     uint32_t vin_now;
@@ -378,9 +378,9 @@ static int config_usage(void)
     printf("usage:\n"
            "  config get\n"
            "  config interval <sample>      e.g. 2m; units s, m or h, bare number = seconds; 15 s-1 h\n"
-           "  config window <HH:MM> <HH:MM> push window in UTC; end before start wraps midnight\n"
+           "  config window <HH:MM> <HH:MM> send window in UTC; end before start wraps midnight\n"
            "  config clock auto|report      let the ack's time correct the clock, or only report\n"
-           "  config listener <ip> <port>   where to push\n"
+           "  config listener <ip> <port>   where to send\n"
            "  config lowv <volts>           supply-low threshold, e.g. 4.6 (3.0-5.5 V)\n"
            "  config wifi <ssid> <password> WiFi network; quote values with spaces, \"\" for none\n");
     return 1;
@@ -470,19 +470,12 @@ static int cmd_quiet(int argc, char **argv)
         printf("usage: quiet [on|off]\n");
         return 1;
     }
-    printf("quiet %s: successful pushes %s\n", ambient_quiet() ? "on" : "off",
+    printf("quiet %s: successful sends %s\n", ambient_quiet() ? "on" : "off",
            ambient_quiet() ? "hidden (problems still shown)" : "shown");
     return 0;
 }
 
-// --- push, reboot ---
-
-static int cmd_push(int argc, char **argv)
-{
-    ambient_request_push();
-    printf("push requested\n");
-    return 0;
-}
+// --- reboot ---
 
 static int cmd_reboot(int argc, char **argv)
 {
@@ -496,15 +489,14 @@ static int cmd_reboot(int argc, char **argv)
 int console_start(void)
 {
     const esp_console_cmd_t cmds[] = {
-        { .command = "status", .help = "Running time, clock, WiFi, pushes, sensors, SD card", .func = cmd_status },
+        { .command = "status", .help = "Running time, clock, WiFi, sends, sensors, SD card", .func = cmd_status },
         { .command = "info",   .help = "Firmware version, build date, MAC address",  .func = cmd_info },
         { .command = "config", .help = "Show or change settings; 'config' alone lists the forms",
           .hint = "get | interval | window | clock | listener | lowv | wifi ...", .func = cmd_config },
-        { .command = "push",   .help = "Push now, outside the schedule",              .func = cmd_push },
         { .command = "read",   .help = "Read the sensors now and print the readings", .func = cmd_read },
         { .command = "tail",   .help = "Last lines of a file on the SD card; alone, list the card's files",
           .hint = "[file [lines]]", .func = cmd_tail },
-        { .command = "quiet",  .help = "Hide (on) or show (off) successful pushes on this console; on at boot",
+        { .command = "quiet",  .help = "Hide (on) or show (off) successful sends on this console; on at boot",
           .hint = "[on|off]", .func = cmd_quiet },
         { .command = "reboot", .help = "Restart the logger; settings are kept",       .func = cmd_reboot },
     };

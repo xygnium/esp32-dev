@@ -26,10 +26,7 @@ typedef struct {
 // Copy of the push loop's counters.
 void ambient_get_push_stats(push_stats_t *out);
 
-// Push now, outside the schedule.
-void ambient_request_push(void);
-
-// Wake the push loop so it re-reads settings (push interval, listener).
+// Wake the loop so it re-reads settings (sample interval, listener).
 void ambient_wake(void);
 
 // Quiet mode: when on, successful pushes are not printed on the serial

@@ -13,7 +13,6 @@ static const char *TAG = "settings";
 #define NVS_NAMESPACE "ambient"
 
 // NVS keys (15 characters at most).
-#define K_PUSH      "push_s"
 #define K_SAMPLE    "sample_s"
 #define K_WIN_START "win_start"
 #define K_WIN_END   "win_end"
@@ -32,7 +31,6 @@ static void set_defaults(settings_t *s)
 {
     memset(s, 0, sizeof(*s));             // WiFi and listener: empty, not set
     s->sample_s = 120;
-    s->push_s = 3600;                     // hourly, 30 samples
     s->window_start = 0;                  // 00:00-24:00 UTC: always, until a window is
     s->window_end = SETTINGS_DAY_MIN;     // set; not enforced before stage 22
     s->clock_auto = true;                 // dev10's clock is internet-synced, so trust the ack
@@ -45,24 +43,6 @@ static const char *check_sample(uint32_t v)
 {
     return (v < SETTINGS_SAMPLE_MIN_S || v > SETTINGS_SAMPLE_MAX_S)
                ? "sample interval must be 15 s to 1 h" : NULL;
-}
-
-// The push interval on its own; check_interval() checks it against the sample.
-static const char *check_push(uint32_t v)
-{
-    return (v < SETTINGS_SAMPLE_MIN_S || v > SETTINGS_PUSH_MAX_S)
-               ? "push interval must be 15 s to 24 h" : NULL;
-}
-
-static const char *check_interval(uint32_t sample, uint32_t push)
-{
-    const char *bad = check_sample(sample);
-    if (!bad) bad = check_push(push);
-    if (bad) return bad;
-    if (push < sample) {
-        return "push interval must not be shorter than the sample interval";
-    }
-    return push % sample ? "push interval must be a whole multiple of the sample interval" : NULL;
 }
 
 static const char *check_window(uint16_t start, uint16_t end)
@@ -156,7 +136,6 @@ static void load_saved(void)
     }
 
     load_u32(h, K_SAMPLE, &s_cur.sample_s, check_sample);
-    load_u32(h, K_PUSH, &s_cur.push_s, check_push);
     load_u32(h, K_LOWV, &s_cur.low_mv, check_low_mv);
 
     uint16_t ws, we;
@@ -225,24 +204,6 @@ int settings_init(void)
     }
     s_nvs_ok = true;
     load_saved();
-
-    // Saved by older firmware, which set the two separately: make the push
-    // interval the next whole multiple of the sample interval (within 24 h),
-    // and save the fix so it's reported once.
-    if (check_interval(s_cur.sample_s, s_cur.push_s) != NULL) {
-        uint32_t s = s_cur.sample_s;
-        uint32_t p = (s_cur.push_s + s - 1) / s * s;
-        if (p > SETTINGS_PUSH_MAX_S) {
-            p = SETTINGS_PUSH_MAX_S / s * s;
-        }
-        ESP_LOGW(TAG, "saved push interval %lu s isn't a multiple of the %lu s sample interval; "
-                 "now %lu s", (unsigned long)s_cur.push_s, (unsigned long)s, (unsigned long)p);
-        s_cur.push_s = p;
-        const char *r = save_locked();
-        if (r) {
-            ESP_LOGW(TAG, "%s", r);
-        }
-    }
     return 0;
 }
 
@@ -270,7 +231,6 @@ static const char *save_locked(void)
         return "applied, but not saved: NVS open failed";
     }
     esp_err_t err = ESP_OK;
-    if (err == ESP_OK) err = nvs_set_u32(h, K_PUSH, s_cur.push_s);
     if (err == ESP_OK) err = nvs_set_u32(h, K_SAMPLE, s_cur.sample_s);
     if (err == ESP_OK) err = nvs_set_u32(h, K_LOWV, s_cur.low_mv);
     if (err == ESP_OK) err = nvs_set_u16(h, K_WIN_START, s_cur.window_start);
@@ -289,13 +249,12 @@ static const char *save_locked(void)
     return NULL;
 }
 
-const char *settings_set_interval(uint32_t sample_s, uint32_t push_s)
+const char *settings_set_interval(uint32_t sample_s)
 {
-    const char *bad = check_interval(sample_s, push_s);
+    const char *bad = check_sample(sample_s);
     if (bad) return bad;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_cur.sample_s = sample_s;
-    s_cur.push_s = push_s;
     const char *r = save_locked();
     xSemaphoreGive(s_lock);
     return r;

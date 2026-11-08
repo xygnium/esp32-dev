@@ -283,9 +283,7 @@ static int cmd_status(int argc, char **argv)
     }
 
     print_listener(&cfg);
-    printf("push       every ");
-    print_duration(cfg.push_s);
-    printf(", next in %" PRIu32 " s\n", ps.next_in_s);
+    printf("push       next retry in %" PRIu32 " s\n", ps.next_in_s);
     if (ps.last == PUSH_NONE) {
         printf("last push  none yet\n");
     } else {
@@ -361,8 +359,6 @@ static void config_print(void)
     settings_get(&cfg);
     printf("interval   sample ");
     print_duration(cfg.sample_s);
-    printf(", push ");
-    print_duration(cfg.push_s);
     printf("\n");
     printf("window     %02u:%02u-%02u:%02u UTC   (not used yet)\n",
            cfg.window_start / 60, cfg.window_start % 60, cfg.window_end / 60, cfg.window_end % 60);
@@ -381,8 +377,7 @@ static int config_usage(void)
 {
     printf("usage:\n"
            "  config get\n"
-           "  config interval <sample> <push>  e.g. 2m 1h; units s, m or h, bare number = seconds.\n"
-           "                                sample 15 s-1 h; push up to 24 h, a whole multiple of sample\n"
+           "  config interval <sample>      e.g. 2m; units s, m or h, bare number = seconds; 15 s-1 h\n"
            "  config window <HH:MM> <HH:MM> push window in UTC; end before start wraps midnight\n"
            "  config clock auto|report      let the ack's time correct the clock, or only report\n"
            "  config listener <ip> <port>   where to push\n"
@@ -402,16 +397,14 @@ static int cmd_config(int argc, char **argv)
         config_print();
         return 0;
     }
-    if (strcmp(what, "interval") == 0 && argc == 4) {
-        uint32_t sample, push;
-        for (int i = 2; i < 4; i++) {
-            if (!parse_duration(argv[i], 1, i == 2 ? &sample : &push)) {
-                printf("not a duration: %s\n", argv[i]);
-                return 1;
-            }
+    if (strcmp(what, "interval") == 0 && argc == 3) {
+        uint32_t sample;
+        if (!parse_duration(argv[2], 1, &sample)) {
+            printf("not a duration: %s\n", argv[2]);
+            return 1;
         }
-        int rc = report(settings_set_interval(sample, push));
-        ambient_wake();               // re-plan the next push with the new interval
+        int rc = report(settings_set_interval(sample));
+        ambient_wake();               // re-plan the next sample with the new interval
         return rc;
     }
     if (strcmp(what, "window") == 0 && argc == 4) {

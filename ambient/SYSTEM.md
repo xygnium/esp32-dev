@@ -20,6 +20,27 @@ One ESP32 logger reads three sensors every 2 minutes, keeps everything on its SD
 - **Clock:** the DS3231 sets the ESP32 clock at boot and every hour. Each ack from logserv carries its time; if the logger is off by more than 50 ms, it corrects the DS3231.
 - **Console:** WiFi, logserv's address and the intervals are set over the USB serial console. `status` shows the current state.
 
+## Why one row per value
+
+Each value is its own row, so a sample of 3 sensors with 2 values each is 6 rows (and 6 messages). The same rows go on the card and into SQLite's `readings` table.
+
+```
+2026-11-07T13:35:48.134Z,thermistor,temp_c,21.57,ok
+2026-11-07T13:35:48.134Z,thermistor,ratio,0.53724,ok
+2026-11-07T13:35:48.153Z,sht45,temp_c,21.74,ok
+2026-11-07T13:35:48.153Z,sht45,rh_pct,54.00,ok
+2026-11-07T13:35:48.184Z,bmp388,temp_c,23.56,ok
+2026-11-07T13:35:48.184Z,bmp388,pressure_pa,100733.0,ok
+```
+
+| Layout | Rows per sample | For | Against |
+| --- | --- | --- | --- |
+| **One row per value** (chosen) | 6 | Every row reads on its own; each value has its own timestamp and status; adding a sensor or value adds rows, never columns; one query shape for everything (`WHERE data_type = ... AND timestamp BETWEEN ...`) | Most rows and messages; the timestamp and sensor name repeat |
+| One row per sensor: `timestamp,sensor,value1,value2,status` | 3 | Half the rows | `value1`/`value2` mean different things per sensor, so you must know which is which; a sensor with 3 values breaks the layout |
+| One row per sample: `timestamp,therm_c,ratio,sht_c,rh,bmp_c,pa,...` | 1 | Fewest rows; easy to open in a spreadsheet | The 3 sensors have different timestamps, so one timestamp is wrong for two of them; needs a status column per sensor; adding a sensor changes the table |
+
+The cost of the chosen layout is size: about 250 KB a day on the card and 100 to 150 MB a year in SQLite (estimated), which is small for both.
+
 ## Messages
 
 The logger sends one message at a time over UDP and waits for its ack before sending the next.

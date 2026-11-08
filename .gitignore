@@ -18,3 +18,6 @@ __pycache__/
 
 # personal Claude Code session config, not a project-wide policy worth sharing via commit
 .claude/settings.json
+
+# Log files from tools and redirected output
+*.log

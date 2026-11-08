@@ -33,6 +33,7 @@
 #include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_rom_crc.h"
+#include "esp_wifi.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
@@ -132,10 +133,15 @@ static bool send_one(const settings_t *cfg, const char *msg, uint32_t seq)
     }
     char reply[128];
     size_t reply_len = 0;
+    // WiFi power save off for the exchange: with it on, the router holds the
+    // ack until the next beacon (up to ~100 ms), so the round trip is
+    // lopsided and the ack's time is no good for the clock.
+    esp_wifi_set_ps(WIFI_PS_NONE);
     int64_t sent_us = esp_timer_get_time();
     int rc = wifi_udp_exchange(cfg->listener_host, cfg->listener_port, msg, strlen(msg),
                                reply, sizeof(reply), &reply_len, REPLY_TIMEOUT_MS);
     int64_t rtt_us = esp_timer_get_time() - sent_us;
+    esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
     if (rc != 0) {
         record(rc == -2 ? PUSH_NO_REPLY : PUSH_SEND_FAILED, seq, NULL);
         return false;

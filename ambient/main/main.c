@@ -144,7 +144,7 @@ static bool send_one(const settings_t *cfg, const char *msg, uint32_t seq)
     char crc[6];
     snprintf(crc, sizeof crc, " %04x", crc16(msg, strlen(msg)));
     if (strncmp(reply, "ack ", 4) != 0 || reply_len < 9 || strcmp(reply + reply_len - 5, crc) != 0) {
-        ESP_LOGW(TAG, "not the ack for this message: %s", reply);
+        ESP_LOGW(TAG, "expected ack failed: %s", reply);
         record(PUSH_NO_REPLY, seq, NULL);
         return false;
     }

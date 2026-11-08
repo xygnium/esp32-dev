@@ -7,7 +7,8 @@
 // (logger-server/udp_listener.py), one message at a time:
 //   data <timestamp,sensor,data_type,value,status>
 //   event <timestamp,source,event,detail>
-// The logger waits for the ack ("ack <UTC time>") and sends the same message
+// The logger waits for the ack ("ack <UTC time> <CRC-16 of the message, 4
+// hex digits>") and sends the same message
 // again every RETRY_S until it is acked, then the next. Events go ahead of
 // readings. Sampling carries on meanwhile; unsent messages wait in RAM.
 // Each ack's time, plus half the round trip, is passed to the clock.
@@ -31,6 +32,7 @@
 #include "freertos/task.h"
 #include "esp_app_desc.h"
 #include "esp_log.h"
+#include "esp_rom_crc.h"
 #include "esp_system.h"
 #include "esp_timer.h"
 
@@ -114,6 +116,13 @@ static void record(push_result_t r, uint32_t seq, const char *reply)
     portEXIT_CRITICAL(&s_stats_mux);
 }
 
+// CRC-16/XMODEM (Python's binascii.crc_hqx(data, 0)), from the ROM, as
+// esp_rom_crc.h gives it.
+static uint16_t crc16(const char *p, size_t len)
+{
+    return ~esp_rom_crc16_be((uint16_t)~0x0000, (const uint8_t *)p, len);
+}
+
 // Send one message and wait for its ack. True if acked.
 static bool send_one(const settings_t *cfg, const char *msg, uint32_t seq)
 {
@@ -129,6 +138,14 @@ static bool send_one(const settings_t *cfg, const char *msg, uint32_t seq)
     int64_t rtt_us = esp_timer_get_time() - sent_us;
     if (rc != 0) {
         record(rc == -2 ? PUSH_NO_REPLY : PUSH_SEND_FAILED, seq, NULL);
+        return false;
+    }
+    // The ack must end with the CRC-16 of the message as sent.
+    char crc[6];
+    snprintf(crc, sizeof crc, " %04x", crc16(msg, strlen(msg)));
+    if (strncmp(reply, "ack ", 4) != 0 || reply_len < 9 || strcmp(reply + reply_len - 5, crc) != 0) {
+        ESP_LOGW(TAG, "not the ack for this message: %s", reply);
+        record(PUSH_NO_REPLY, seq, NULL);
         return false;
     }
     if (!s_quiet) {

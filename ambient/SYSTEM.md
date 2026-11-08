@@ -28,8 +28,9 @@ The logger sends one message at a time over UDP and waits for its ack before sen
 | --- | --- |
 | `data <timestamp,sensor,data_type,value,status>` | One reading |
 | `event <timestamp,source,event,detail>` | One event |
-| `ack <UTC time>` (logserv's reply) | Acceptance, plus the time for the clock |
+| `ack <UTC time> <CRC-16>` (logserv's reply) | Proof the message arrived intact, plus the time for the clock |
 
+- **Ack:** `ack <UTC time> <CRC-16 of the message>` (CRC-16/XMODEM, 4 hex digits); a reply that doesn't match doesn't count.
 - **No ack within 2 s:** the same message is sent again every 10 s, forever, until it's acked.
 - **Order:** events go ahead of readings.
 - **While waiting:** sampling and card writes carry on. Unsent messages queue in RAM: 200 readings (about 1 hour) and 32 events. A full queue drops new messages, which stay on the card.
@@ -40,7 +41,7 @@ The logger sends one message at a time over UDP and waits for its ack before sen
 
 - **Prints** every message with its local arrival time.
 - **Stores** it with `--db <file>`: readings in the `readings` table, events in the `events` table.
-- **Acks** every message with `ack <UTC time, ms>`.
+- **Acks** every message with `ack <UTC time, ms> <CRC-16 of the message>`.
 - **Repeats:** a message identical to the one before (resent because an ack was lost) isn't stored again; logserv records its own event instead, `logserv,repeat,<message>`.
 
 ## Faults

@@ -49,14 +49,6 @@ typedef struct {
 
 void clock_get_info(clock_info_t *out);
 
-#ifdef AMBIENT_TEST_FAULTS
-// Test builds only: resync every `seconds` instead of hourly, until reboot.
-void clock_test_set_resync(uint32_t seconds);
-
-// Test builds only: make the DS3231 stop its oscillator when it next runs on
-// its battery, so a power cut sets the real stop flag. Cleared at boot.
-int clock_test_stop_on_battery(void);
-#endif
 
 // Current UTC time as 2026-11-06T07:08:19.482Z.
 void clock_now_str(char *buf, size_t size);

@@ -9,8 +9,6 @@
 // clock is kept in UTC, 24-hour mode. Its time registers count whole seconds.
 // All functions return 0 on success, -1 on a bus error or an impossible value.
 
-// addr is normally DS3231_ADDR; test builds can pass an unused address to
-// simulate a missing chip.
 #define DS3231_ADDR 0x68
 int ds3231_init(uint8_t addr);
 
@@ -27,11 +25,5 @@ int ds3231_write(const struct tm *utc);
 
 int ds3231_clear_osf(void);
 
-// EOSC (control register bit 7). Set, the oscillator stops whenever the chip
-// runs on its battery, which also sets the stop flag (datasheet). Normally
-// clear: clock_init clears it at every boot. Test builds set it with
-// `test rtc-stop` to get a real stop flag at the next power cut.
-int ds3231_get_eosc(bool *stop_on_battery);
-int ds3231_set_eosc(bool stop_on_battery);
 
 #endif

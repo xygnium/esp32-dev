@@ -27,8 +27,8 @@ void fault_raise(fault_src_t src, const char *reason)
     } else {
         ESP_LOGE(TAG, "also failed: %s: %s", fault_src_name(src), reason);
     }
-    // Not written for an SD fault (the card is the problem); held until the
-    // clock is set otherwise.
+    // Sent to the listener; not written for an SD fault (the card is the
+    // problem), nor while the clock is unset.
     datalog_event(fault_src_name(src), "fault", "%s", reason);
 }
 

@@ -4,9 +4,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-
 // What the push loop (main.c) shares with the console commands.
 
 typedef enum {
@@ -41,8 +38,5 @@ void ambient_wake(void);
 // debugging.
 void ambient_set_quiet(bool on);
 bool ambient_quiet(void);
-
-// The main loop's task, for its stack headroom in `status`.
-TaskHandle_t ambient_main_task(void);
 
 #endif

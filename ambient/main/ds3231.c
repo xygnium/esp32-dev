@@ -11,8 +11,6 @@ static const char *TAG = "ds3231";
 #define XFER_TIMEOUT_MS 100
 
 #define REG_SECONDS     0x00
-#define REG_CONTROL     0x0E
-#define CONTROL_EOSC    0x80            // 1: oscillator stops when on the battery
 #define REG_STATUS      0x0F
 #define STATUS_OSF      0x80
 
@@ -128,23 +126,3 @@ int ds3231_clear_osf(void)
     return write_regs(buf, sizeof buf);
 }
 
-int ds3231_get_eosc(bool *stop_on_battery)
-{
-    uint8_t ctrl;
-    if (read_regs(REG_CONTROL, &ctrl, 1) != 0) {
-        return -1;
-    }
-    *stop_on_battery = (ctrl & CONTROL_EOSC) != 0;
-    return 0;
-}
-
-int ds3231_set_eosc(bool stop_on_battery)
-{
-    uint8_t ctrl;
-    if (read_regs(REG_CONTROL, &ctrl, 1) != 0) {
-        return -1;
-    }
-    ctrl = stop_on_battery ? (ctrl | CONTROL_EOSC) : (ctrl & ~CONTROL_EOSC);
-    uint8_t buf[2] = { REG_CONTROL, ctrl };
-    return write_regs(buf, sizeof buf);
-}

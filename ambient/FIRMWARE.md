@@ -1,6 +1,6 @@
 # Ambient firmware
 
-Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The build, flash layout and memory use are in [BUILD.md](BUILD.md), and the regression tests in [TESTS.md](TESTS.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py` in the `logger-server` repo, which also holds the protocol description), mounts and checks the SD card, keeps time from the DS3231 (see [Time](#time)), and samples the sensors (see [Sensors](#sensors)). It doesn't log or push the readings yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
+Decisions and open items for the `ambient` firmware. Wiring is in [WIRING.md](WIRING.md). The build, flash layout and memory use are in [BUILD.md](BUILD.md). The firmware currently sends a status line over UDP to the listener (`udp_listener.py` in the `logger-server` repo, which also holds the protocol description), mounts and checks the SD card, keeps time from the DS3231 (see [Time](#time)), and samples the sensors (see [Sensors](#sensors)). It doesn't log or push the readings yet. It doesn't call `esp_wifi_set_ps`, so it runs with ESP-IDF's default power-save mode, `WIFI_PS_MIN_MODEM` (`esp_wifi.h`).
 
 The reading scheme (ratiometric, pulsed excitation on GPIO25, A0 for the excitation and A1 for the tap) is in [How the thermistor is read](WIRING.md#how-the-thermistor-is-read).
 
@@ -65,7 +65,6 @@ Recommended: commands in the ack, unless replies within seconds are needed.
   - The console stays up, and `status` shows the fault.
   - The fault is printed and pushed to the listener at once, then every push interval, in place of the status line: `fault sd=<reason> seq=<n> up=<s> mac=<own MAC>`.
   - Only a reboot clears it. The first fault is kept; later ones are only logged.
-- **Fault injection (test builds only):** `./build-test.sh` and `./flash-test.sh` build into `build-test/` with `AMBIENT_TEST_FAULTS`, which adds `test fault sd <reason>`. It raises the fault through the same path as a real one, for faults that can't be caused by hand. `info` says `TEST` in a test build. Production builds (`./build.sh`, `./flash.sh`) don't contain the command.
 
 ## Time
 
@@ -78,8 +77,6 @@ Recommended: commands in the ack, unless replies within seconds are needed.
   - `not_responding`: a read fails while running, including at the hourly resync.
   - Acks never clear a fault.
 - **Remediation** for a failed clock: replace the board or battery, reformat the card on a PC, and restart. With the flag set and an empty card, the logger treats the restart as remediated: the clock is unset, `status` shows `clock  not set (waiting for ack)`, and the status line carries `clock=unset` and goes out every 10 s as a time request. The first ack sets the DS3231, then the flag is cleared and the ESP32 synced. Data from before a detected fault isn't used.
-- **Test builds:** `test fault rtc <reason>` injects a fault. `test rtc-absent on|off` (saved, takes effect at boot) makes the logger look for the DS3231 at 0x69, where nothing answers, so a missing chip is detected for real. `test resync <seconds>` resyncs that often instead of hourly, until reboot.
-- **First run (2026-11-06):** the DS3231 was found 80.3 s slow, left over from setting it with `rtc-probe` from the build time. The first ack corrected it; after that the ack offset stayed at about +1 to +8 ms (round trip 13 to 20 ms), under the 50 ms threshold. A steady +8 ms may be the DS3231 slightly behind dev10, or an asymmetric network delay; not investigated. With `test resync 15` the resync ran every 16 s (15 s plus the edge wait) and found the ESP32 within ±1 ms of the DS3231 each time.
 
 ## Sensors
 
@@ -101,14 +98,13 @@ Recommended: commands in the ack, unless replies within seconds are needed.
 The ratio is kept so a later calibration of the thermistor can be applied to past data.
 
 - **Console:** `status` has a line per sensor with its last values and stamp, or its failure and how many readings in a row have failed. `read` takes one reading of all three now and prints it (refused while the clock is unset).
-- **Tested (2026-11-06):** all three read, the thermistor about 0.1 °C below the SHT45. CAT5 #2 out: thermistor `open`, SHT45 `nack`, BMP388 still reading. CAT5 #1 out: thermistor and SHT45 `nack`. BMP388 pulled with the power off: `nack`, the others reading. Each recovered at the first reading after it was reconnected.
 
 ## Open items
 
 - **Clock test, remediation:** set the oscillator-stop flag (DS3231 battery out with the board unpowered), restart with an empty card, and check the first ack sets the time and clears the flag. Skipped: needs the board out of the warm box; do it next time it's removed.
 - **Clock test, invalid clock with data on the card:** should be a hard fault (`invalid`). Suspended until the logger writes to the card.
-- **Clock drift:** the resync itself is tested (below). How far the ESP32 drifts in a real hour shows in the hourly `resynced from the DS3231` log line and in the ack offset; check it after a few days of normal running.
-- **Clock test, `clock report`:** with an offset over 50 ms, check `report` leaves the DS3231 alone. Not yet run: after the first correction there was no offset that large to test with.
+- **Clock drift:** how far the ESP32 drifts in a real hour shows in the hourly `resynced from the DS3231` log line and in the ack offset; check it after a few days of normal running.
+- **Clock test, `clock report`:** with an offset over 50 ms, check `report` leaves the DS3231 alone. Not yet run.
 - **SD test, not-empty card:** with files on the card, `status` should say `not empty at boot`. Suspended until the logger writes to the card.
 - **Thermistor noise test:** the noise test in WIRING.md (build step 3), with WiFi idle and with WiFi plus SD writes (`ads1115-probe` does both).
 - **Alerting (separate project):** a sensor failure or hard fault shows only on the console and in logserv's output. A way to be told (email, phone) is still to be chosen.

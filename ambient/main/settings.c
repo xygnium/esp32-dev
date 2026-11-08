@@ -358,29 +358,3 @@ const char *settings_set_low_mv(uint32_t mv)
     return r;
 }
 
-#ifdef AMBIENT_TEST_FAULTS
-#define K_TEST_RTC "t_rtc_absent"
-
-bool settings_test_rtc_absent(void)
-{
-    nvs_handle_t h;
-    uint8_t v = 0;
-    if (s_nvs_ok && nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) == ESP_OK) {
-        nvs_get_u8(h, K_TEST_RTC, &v);
-        nvs_close(h);
-    }
-    return v != 0;
-}
-
-const char *settings_set_test_rtc_absent(bool on)
-{
-    nvs_handle_t h;
-    if (!s_nvs_ok || nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) {
-        return "not saved: NVS unavailable";
-    }
-    esp_err_t err = nvs_set_u8(h, K_TEST_RTC, on ? 1 : 0);
-    if (err == ESP_OK) err = nvs_commit(h);
-    nvs_close(h);
-    return err == ESP_OK ? NULL : "not saved: NVS write failed";
-}
-#endif

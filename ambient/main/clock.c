@@ -26,7 +26,6 @@ static const char *TAG = "clock";
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static clock_info_t s_info = { .last_sync_up_s = -1, .correction_up_s = -1 };
 static int64_t s_next_resync_us = INT64_MAX;
-static int64_t s_resync_us = RESYNC_US;       // test builds can shorten it
 
 static int64_t sys_now_us(void)
 {
@@ -101,7 +100,7 @@ static int sync_from_ds3231(bool step)
     s_info.last_sync_up_s = uptime_s();
     s_info.last_sync_ms = step ? 0 : (int32_t)(offset / 1000);
     portEXIT_CRITICAL(&s_mux);
-    s_next_resync_us = esp_timer_get_time() + s_resync_us;
+    s_next_resync_us = esp_timer_get_time() + RESYNC_US;
     return 0;
 }
 
@@ -129,27 +128,9 @@ static int set_ds3231(int64_t offset_us)
 
 int clock_init(void)
 {
-    uint8_t addr = DS3231_ADDR;
-#ifdef AMBIENT_TEST_FAULTS
-    if (settings_test_rtc_absent()) {
-        addr = 0x69;                      // nothing answers there (WIRING.md, Table 3)
-        ESP_LOGW(TAG, "TEST: looking for the DS3231 at 0x%02x to simulate a missing chip", addr);
-    }
-#endif
-    if (ds3231_init(addr) != 0) {
+    if (ds3231_init(DS3231_ADDR) != 0) {
         fault_raise(FAULT_RTC, "missing");
         return -1;
-    }
-    // The oscillator must run on the battery, or the clock stops at every
-    // power cut. Only `test rtc-stop` sets this; a stray set is cleared here.
-    bool eosc;
-    if (ds3231_get_eosc(&eosc) != 0 || (eosc && ds3231_set_eosc(false) != 0)) {
-        not_responding();
-        return -1;
-    }
-    if (eosc) {
-        ESP_LOGW(TAG, "DS3231 was set to stop its oscillator on the battery; cleared");
-        datalog_event("clock", "eosc_cleared", "%s", "was set");
     }
     struct tm t;
     bool osf;
@@ -272,20 +253,6 @@ void clock_on_ack(const char *reply, int64_t rtt_us, bool auto_correct)
     }
 }
 
-#ifdef AMBIENT_TEST_FAULTS
-int clock_test_stop_on_battery(void)
-{
-    return ds3231_set_eosc(true);
-}
-
-void clock_test_set_resync(uint32_t seconds)
-{
-    s_resync_us = (int64_t)seconds * 1000000;
-    if (clock_is_set()) {
-        s_next_resync_us = esp_timer_get_time() + s_resync_us;
-    }
-}
-#endif
 
 void clock_get_info(clock_info_t *out)
 {

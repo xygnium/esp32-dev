@@ -80,7 +80,7 @@ The ESP32 here has 4 MB of flash (`CONFIG_ESPTOOLPY_FLASHSIZE_4MB` in `sdkconfig
 
 The app went from 1 MB to 3 MB (69 % free), and about 960 KB at the end stays unused. For OTA later, the 3 MB app would be replaced by `otadata` and two app slots of about 1.5 MB each. That means repartitioning again, but NVS stays put.
 
-Keeping NVS in place means the settings survive: WiFi SSID and password, the listener, the intervals, `clock auto/report` and the test flags. These are set only on the console now. If NVS moved, they would have to be typed in again. It's a small saving, but it costs nothing.
+Keeping NVS in place means the settings survive: WiFi SSID and password, the listener, the intervals, and `clock auto/report`. These are set only on the console now. If NVS moved, they would have to be typed in again. It's a small saving, but it costs nothing.
 
 ## NVS and wear
 
@@ -102,7 +102,7 @@ The sensor logs go to the SD card, not internal flash. The card's controller doe
 
 ## The build
 
-`./build.sh` runs `idf.py build`, which runs CMake, which then runs **make**. On this VM CMake generates Unix Makefiles (see `CMAKE_GENERATOR` in `build/CMakeCache.txt`). IDF prefers Ninja, which does the same job and is faster on small rebuilds, but it isn't installed. Installing it is deferred. If it's installed later, delete `build/` and `build-test/`, because the generator is fixed when a build directory is created.
+`./build.sh` runs `idf.py build`, which runs CMake, which then runs **make**. On this VM CMake generates Unix Makefiles (see `CMAKE_GENERATOR` in `build/CMakeCache.txt`). IDF prefers Ninja, which does the same job and is faster on small rebuilds, but it isn't installed. Installing it is deferred. If it's installed later, delete `build/`, because the generator is fixed when a build directory is created.
 
 **Table 4: Build steps**
 

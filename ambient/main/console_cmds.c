@@ -26,7 +26,6 @@
 
 #define CONSOLE_STACK 6144
 
-static TaskHandle_t s_console_task;     // known from the first `status`
 
 static const char *TAG = "console";
 
@@ -328,33 +327,13 @@ static int cmd_status(int argc, char **argv)
     }
     datalog_info_t dl;
     datalog_get_info(&dl);
-    if (dl.low) {
-        printf("           LOW: under 10 %% free\n");
-    }
     if (dl.file[0]) {
         printf("log        %s, %" PRIu32 " bytes; %" PRIu32 " rows, %" PRIu32 " events since boot",
                dl.file, dl.file_bytes, dl.rows, dl.events);
     } else {
         printf("log        nothing written yet; %" PRIu32 " events since boot", dl.events);
     }
-    if (dl.held) {
-        printf(", %" PRIu32 " held for the clock", dl.held);
-    }
-    if (dl.dropped) {
-        printf(", %" PRIu32 " lost", dl.dropped);
-    }
-#ifdef AMBIENT_TEST_FAULTS
-    if (datalog_test_minute_files_on()) {
-        printf(" (TEST: a file per minute)");
-    }
-#endif
     printf("\n");
-    if (!s_console_task) {
-        s_console_task = xTaskGetCurrentTaskHandle();   // status runs in the console task
-    }
-    printf("stack      lowest free since boot: main %u B of %u, console %u B of %u\n",
-           (unsigned)uxTaskGetStackHighWaterMark(ambient_main_task()), (unsigned)CONFIG_ESP_MAIN_TASK_STACK_SIZE,
-           (unsigned)uxTaskGetStackHighWaterMark(s_console_task), (unsigned)CONSOLE_STACK);
     printf("settings   %s\n", settings_saved_to_flash() ? "saved in flash"
                                                        : "NOT saved: NVS unavailable, defaults in use");
     return 0;
@@ -370,75 +349,9 @@ static int cmd_info(int argc, char **argv)
     printf("firmware   %s %s, built %s %s\n", app->project_name, app->version, app->date, app->time);
     printf("esp-idf    %s\n", app->idf_ver);
     printf("mac        %s\n", mac);
-#ifdef AMBIENT_TEST_FAULTS
-    printf("build      TEST: fault injection enabled; not for production\n");
-#endif
     return 0;
 }
 
-#ifdef AMBIENT_TEST_FAULTS
-// --- test (test builds only) ---
-
-// Raise a fault through the same path as a real one.
-static int cmd_test(int argc, char **argv)
-{
-    static const char *const sd_reasons[] = { "missing", "mount_failed", "not_responding",
-                                              "full", "write_failed", NULL };
-    static const char *const rtc_reasons[] = { "missing", "invalid", "not_responding", NULL };
-    if (argc == 4 && strcmp(argv[1], "fault") == 0) {
-        bool sd = strcmp(argv[2], "sd") == 0, rtc = strcmp(argv[2], "rtc") == 0;
-        const char *const *reasons = sd ? sd_reasons : rtc ? rtc_reasons : NULL;
-        for (size_t i = 0; reasons && reasons[i]; i++) {
-            if (strcmp(argv[3], reasons[i]) == 0) {
-                fault_raise(sd ? FAULT_SD : FAULT_RTC, reasons[i]);
-                ambient_wake();       // push the fault line now
-                return 0;
-            }
-        }
-    }
-    if (argc == 3 && strcmp(argv[1], "rtc-absent") == 0
-        && (strcmp(argv[2], "on") == 0 || strcmp(argv[2], "off") == 0)) {
-        bool on = strcmp(argv[2], "on") == 0;
-        int rc = report(settings_set_test_rtc_absent(on));
-        if (rc == 0) {
-            printf("DS3231 %s at the next boot; reboot to apply\n",
-                   on ? "simulated missing" : "looked for normally");
-        }
-        return rc;
-    }
-    uint32_t secs;
-    if (argc == 3 && strcmp(argv[1], "resync") == 0 && parse_u32(argv[2], &secs) && secs >= 10) {
-        clock_test_set_resync(secs);
-        printf("DS3231 resync every %" PRIu32 " s until reboot\n", secs);
-        ambient_wake();
-        return 0;
-    }
-    if (argc == 2 && strcmp(argv[1], "rtc-stop") == 0) {
-        if (clock_test_stop_on_battery() != 0) {
-            printf("DS3231 didn't answer\n");
-            return 1;
-        }
-        printf("DS3231 oscillator set to stop on the battery. Unplug the power for a few\n"
-               "seconds and plug it back in: the stop flag is then really set. The next\n"
-               "boot clears the setting. Not a fault until then\n");
-        return 0;
-    }
-    if (argc == 3 && strcmp(argv[1], "dayfile") == 0
-        && (strcmp(argv[2], "minute") == 0 || strcmp(argv[2], "day") == 0)) {
-        bool minute = strcmp(argv[2], "minute") == 0;
-        datalog_test_minute_files(minute);
-        printf("a readings file per %s until reboot\n", minute ? "UTC minute" : "UTC day");
-        return 0;
-    }
-    printf("usage: test fault sd missing|mount_failed|not_responding|full|write_failed\n"
-           "       test fault rtc missing|invalid|not_responding\n"
-           "       test rtc-absent on|off   (at boot, look for the DS3231 at an unused address)\n"
-           "       test resync <seconds>    (resync from the DS3231 this often, 10 s or more, until reboot)\n"
-           "       test dayfile minute|day  (a readings file per UTC minute or day, until reboot)\n"
-           "       test rtc-stop            (DS3231 stops on the battery: a power cut sets its stop flag)\n");
-    return 1;
-}
-#endif
 
 // --- config ---
 
@@ -601,11 +514,6 @@ int console_start(void)
         { .command = "quiet",  .help = "Hide (on) or show (off) successful pushes on this console; on at boot",
           .hint = "[on|off]", .func = cmd_quiet },
         { .command = "reboot", .help = "Restart the logger; settings are kept",       .func = cmd_reboot },
-#ifdef AMBIENT_TEST_FAULTS
-        { .command = "test",   .help = "TEST BUILD: raise a hard fault as if it were real",
-          .hint = "fault sd|rtc <reason> | rtc-absent on|off | resync <s> | dayfile minute|day | rtc-stop",
-          .func = cmd_test },
-#endif
     };
 
     esp_err_t err = esp_console_register_help_command();

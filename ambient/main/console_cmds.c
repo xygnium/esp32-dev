@@ -332,6 +332,9 @@ static int cmd_status(int argc, char **argv)
         printf("log        nothing written yet; %" PRIu32 " events since boot", dl.events);
     }
     printf("\n");
+    if (dl.sent_file[0]) {
+        printf("sent to    %s byte %" PRIu32 "\n", dl.sent_file, dl.sent_bytes);
+    }
     printf("settings   %s\n", settings_saved_to_flash() ? "saved in flash"
                                                        : "NOT saved: NVS unavailable, defaults in use");
     return 0;

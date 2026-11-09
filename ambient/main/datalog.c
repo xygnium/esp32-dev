@@ -13,6 +13,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 
 #include "ambient.h"
 #include "clock.h"
@@ -26,47 +27,174 @@ static const char *TAG = "sd";
 #define READINGS_HEADER "timestamp,sensor,data_type,value,status\n"
 #define EVENTS_HEADER   "timestamp,source,event,detail\n"
 
-#define DATA_QUEUE_LEN  200     // readings waiting to be sent (about 32 KB)
-#define EVENT_QUEUE_LEN 32      // events waiting; these go first
+#define SENT_PATH       SD_MOUNT_POINT "/sent.txt"
+#define SAVE_US         (10 * 60 * 1000000LL)   // how often the send position is saved
+#define RAM_QUEUE_LEN   32      // events not on the card, waiting to be sent
 
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;   // guards s_info
 static datalog_info_t s_info;
-static QueueHandle_t s_events, s_data, s_peeked;
 
-// Queue a message for the listener. If its queue is full it's dropped (it's
-// still on the card).
-static void outbox_put(const char *kind, const char *row, size_t len)
+// Sending: events not written to the card go from a RAM queue. Everything on
+// the card is sent from the card: events.csv, then the readings files, oldest
+// first. The position (the readings file, and the byte after the last acked
+// line in it and in events.csv) is saved in sent.txt every SAVE_US, so after
+// a reboot up to SAVE_US of lines are sent again. With no sent.txt (a new
+// card) everything on the card is sent.
+static QueueHandle_t s_ram;
+static char s_cur[24];            // readings file being sent; "" none yet
+static long s_cur_off, s_ev_off;  // where the next line to send starts
+static long s_next_off;           // after the line datalog_next returned
+static enum { FROM_NONE, FROM_RAM, FROM_EVENTS, FROM_READINGS } s_from;
+static char s_newest[24];         // readings file last written
+static bool s_loaded, s_dirty;
+static int64_t s_saved_us;
+
+static void load_pos(void)
 {
-    if (!s_events) {
-        s_events = xQueueCreate(EVENT_QUEUE_LEN, DATALOG_MSG_LEN);
-        s_data = xQueueCreate(DATA_QUEUE_LEN, DATALOG_MSG_LEN);
+    sd_lock();
+    FILE *f = fopen(SENT_PATH, "r");
+    if (f) {
+        if (fscanf(f, "%23s %ld %ld", s_cur, &s_cur_off, &s_ev_off) != 3 || s_cur[0] == '-') {
+            s_cur[0] = '\0';
+            s_cur_off = 0;
+        }
+        fclose(f);
     }
-    char msg[DATALOG_MSG_LEN];
-    snprintf(msg, sizeof msg, "%s %.*s", kind, (int)len, row);
-    if (xQueueSend(kind[0] == 'e' ? s_events : s_data, msg, 0) != pdTRUE) {
-        ESP_LOGW(TAG, "queue full; not sent: %s", msg);
-        return;
+    sd_unlock();
+    s_loaded = true;
+}
+
+// Fixed width, so each save overwrites the same bytes.
+static void save_pos(void)
+{
+    char line[48];
+    int n = snprintf(line, sizeof line, "%-23s %10ld %10ld\n", s_cur[0] ? s_cur : "-",
+                     s_cur_off, s_ev_off);
+    sd_lock();
+    int fd = open(SENT_PATH, O_WRONLY | O_CREAT, 0644);
+    bool ok = fd >= 0 && write(fd, line, n) == n && fsync(fd) == 0;
+    if (fd >= 0) {
+        close(fd);
     }
-    ambient_wake();
+    sd_unlock();
+    if (!ok) {
+        ESP_LOGW(TAG, "can't save the send position: %s", strerror(errno));
+    }
+    s_saved_us = esp_timer_get_time();
+    s_dirty = false;
+}
+
+// The line starting at off in path, skipping header lines, into msg as
+// "<kind> <line>". Returns the offset after it, or -1 if there's no whole
+// line there.
+static long read_line(const char *path, long off, const char *kind, char *msg)
+{
+    char buf[DATALOG_MSG_LEN];
+    while (1) {
+        sd_lock();
+        int fd = open(path, O_RDONLY);
+        ssize_t n = fd >= 0 && lseek(fd, off, SEEK_SET) == off ? read(fd, buf, sizeof buf - 1) : -1;
+        if (fd >= 0) {
+            close(fd);
+        }
+        sd_unlock();
+        if (n <= 0) {
+            return -1;
+        }
+        buf[n] = '\0';
+        char *end = strchr(buf, '\n');
+        if (!end) {
+            return -1;
+        }
+        *end = '\0';
+        off += end - buf + 1;
+        if (strncmp(buf, "timestamp,", 10) != 0) {
+            snprintf(msg, DATALOG_MSG_LEN, "%s %.150s", kind, buf);
+            return off;
+        }
+    }
+}
+
+// The first readings file (YYYY-MM-DD.csv) named after `after`, into out.
+static bool next_file(const char *after, char out[24])
+{
+    bool found = false;
+    sd_lock();
+    DIR *d = opendir(SD_MOUNT_POINT);
+    struct dirent *e;
+    while (d && (e = readdir(d)) != NULL) {
+        const char *n = e->d_name;
+        if (strlen(n) == 14 && n[4] == '-' && n[7] == '-' && strcmp(n + 10, ".csv") == 0 &&
+            strcmp(n, after) > 0 && (!found || strcmp(n, out) < 0)) {
+            strlcpy(out, n, 24);
+            found = true;
+        }
+    }
+    if (d) {
+        closedir(d);
+    }
+    sd_unlock();
+    return found;
 }
 
 bool datalog_next(char *msg)
 {
-    s_peeked = NULL;
-    if (s_events && xQueuePeek(s_events, msg, 0) == pdTRUE) {
-        s_peeked = s_events;
-    } else if (s_data && xQueuePeek(s_data, msg, 0) == pdTRUE) {
-        s_peeked = s_data;
+    s_from = FROM_NONE;
+    if (s_ram && xQueuePeek(s_ram, msg, 0) == pdTRUE) {
+        s_from = FROM_RAM;
+        return true;
     }
-    return s_peeked != NULL;
+    if (!sd_usable()) {
+        return false;
+    }
+    if (!s_loaded) {
+        load_pos();
+    }
+    if ((s_next_off = read_line(EVENTS_PATH, s_ev_off, "event", msg)) >= 0) {
+        s_from = FROM_EVENTS;
+        return true;
+    }
+    while (1) {
+        if (s_cur[0]) {
+            char path[64];
+            snprintf(path, sizeof path, SD_MOUNT_POINT "/%s", s_cur);
+            if ((s_next_off = read_line(path, s_cur_off, "data", msg)) >= 0) {
+                s_from = FROM_READINGS;
+                return true;
+            }
+            if (strcmp(s_cur, s_newest) == 0) {
+                return false;             // all sent
+            }
+        }
+        char next[24];
+        if (!next_file(s_cur, next)) {
+            return false;
+        }
+        strlcpy(s_cur, next, sizeof s_cur);
+        s_cur_off = 0;
+        s_dirty = true;
+    }
 }
 
 void datalog_sent(void)
 {
     char msg[DATALOG_MSG_LEN];
-    if (s_peeked) {
-        xQueueReceive(s_peeked, msg, 0);
-        s_peeked = NULL;
+    if (s_from == FROM_RAM) {
+        xQueueReceive(s_ram, msg, 0);
+    } else if (s_from == FROM_EVENTS) {
+        s_ev_off = s_next_off;
+        s_dirty = true;
+    } else if (s_from == FROM_READINGS) {
+        s_cur_off = s_next_off;
+        s_dirty = true;
+    }
+    s_from = FROM_NONE;
+    portENTER_CRITICAL(&s_mux);
+    strlcpy(s_info.sent_file, s_cur, sizeof s_info.sent_file);
+    s_info.sent_bytes = (uint32_t)s_cur_off;
+    portEXIT_CRITICAL(&s_mux);
+    if (s_dirty && esp_timer_get_time() - s_saved_us >= SAVE_US) {
+        save_pos();
     }
 }
 
@@ -128,8 +256,18 @@ void datalog_event(const char *source, const char *event, const char *fmt, ...)
         portENTER_CRITICAL(&s_mux);
         s_info.events++;
         portEXIT_CRITICAL(&s_mux);
+    } else {
+        // Not on the card: sent from RAM.
+        if (!s_ram) {
+            s_ram = xQueueCreate(RAM_QUEUE_LEN, DATALOG_MSG_LEN);
+        }
+        char msg[DATALOG_MSG_LEN];
+        snprintf(msg, sizeof msg, "event %.*s", (int)(len - 1), row);   // without the line end
+        if (xQueueSend(s_ram, msg, 0) != pdTRUE) {
+            ESP_LOGW(TAG, "queue full; not sent: %s", msg);
+        }
     }
-    outbox_put("event", row, len - 1);    // without the line end
+    ambient_wake();
 }
 
 size_t datalog_rows(const sensor_result_t r[SENSOR_COUNT], char *buf, size_t size)
@@ -175,9 +313,8 @@ void datalog_sample(const sensor_result_t r[SENSOR_COUNT])
     if (size < 0) {
         return;
     }
-    for (char *row = buf, *end; (end = strchr(row, '\n')) != NULL; row = end + 1) {
-        outbox_put("data", row, end - row);
-    }
+    strlcpy(s_newest, name, sizeof s_newest);
+    ambient_wake();
     portENTER_CRITICAL(&s_mux);
     strlcpy(s_info.file, name, sizeof s_info.file);
     s_info.file_bytes = (uint32_t)size;

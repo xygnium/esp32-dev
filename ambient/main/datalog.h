@@ -17,11 +17,14 @@
 // Each write is append, fsync, close. A failed write raises sd=write_failed.
 // Nothing is written while the clock is unset or during an SD fault.
 //
-// Every reading and event is also queued for the listener, one message each:
+// Every reading and event is sent to the listener, one message each:
 //   data <timestamp,sensor,data_type,value,status>
 //   event <timestamp,source,event,detail>
-// Events are sent ahead of readings. An event from before the clock is set
-// has an empty timestamp, and is sent but not written.
+// They're sent from the card, so nothing is lost while the listener is away
+// or over a reboot; sent.txt keeps the position (datalog.c). Events go ahead
+// of readings. An event that isn't written (from before the clock is set, or
+// during an SD fault) is sent from a RAM queue instead; one from before the
+// clock is set has an empty timestamp.
 
 #define DATALOG_MSG_LEN 160
 
@@ -48,6 +51,8 @@ typedef struct {
     uint32_t file_bytes;      // its size after that write
     uint32_t rows;            // reading rows written since boot
     uint32_t events;          // event rows written since boot
+    char sent_file[24];       // the readings file being sent; "" none yet
+    uint32_t sent_bytes;      // sent and acked up to this byte of it
 } datalog_info_t;
 
 void datalog_get_info(datalog_info_t *out);

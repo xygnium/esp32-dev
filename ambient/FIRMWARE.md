@@ -131,6 +131,20 @@ The ratio is kept so a later calibration of the thermistor can be applied to pas
 
 - **Never deletes or formats** anything on the card.
 
+## Sending from the card
+
+Every reading and event on the card is sent to logserv from the card itself, one line at a time, each one acked before the next (`datalog.c`). Nothing is lost while logserv or WiFi is down, or over a reboot: the backlog goes out when the link is back.
+
+- **Order:** events not on the card (from before the clock is set, or during an SD fault) go first, from a small RAM queue (32). Then `events.csv`, then the readings files, oldest day first.
+- **Position:** `/sdcard/sent.txt` holds the readings file being sent and the byte after the last acked line in it and in `events.csv`, e.g. `2026-11-08.csv 15134 4210`. It's one fixed-width line, rewritten in place at most every 10 min, so it adds about 144 small writes a day.
+- **After a reboot:** sending restarts from `sent.txt`, so up to 10 min of lines go again. logserv ignores rows it already has (same timestamp, sensor and data_type; for events, all four fields) and prints them as `repeat`.
+- **No `sent.txt`** (a new card, or one from before this change): everything on the card is sent.
+- **Rate:** about 30 messages a second, so a day at 30 s (17,280 readings) takes about 10 min.
+- **`status`** shows how far sending has got: `sent to    2026-11-09.csv byte 671791`.
+- **Weak spots:** a power cut in the middle of a write can leave half a line, which the next write joins: that one row is refused by logserv (it's still acked, so sending carries on). If `events.csv` is replaced by a shorter file, its events aren't sent until it grows past the saved position.
+
+Test 2026-11-09: a fresh logserv database, then the firmware flashed with no `sent.txt`. The whole card (11-07 to 11-09, 29,000 readings) reached the database at about 30 a second. After two reboots the resent lines all showed as `repeat` in logserv's output and none were stored twice. The gaps between samples in the database are only where the logger was off or rebooting (70 to 85 s per reboot).
+
 ## Open items
 
 - **Clock test, remediation:** set the oscillator-stop flag (DS3231 battery out with the board unpowered), restart with an empty card, and check the first ack sets the time and clears the flag. Skipped: needs the board out of the warm box; do it next time it's removed.

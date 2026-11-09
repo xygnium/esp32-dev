@@ -23,6 +23,7 @@ The console sometimes shows a run of � in place of the start of a line. It spo
 | serial-probe, board direct in a dev10 USB 2.0 port | 40 passes clean |
 | serial-probe, board direct in dev10 USB 3 ports | Junk within 5 passes |
 | serial-probe, Genesys hub in a USB 2.0 port | 51 passes clean |
+| ambient with `quiet off`, Genesys hub in a dev10 USB 2.0 port (2026-11-09) | Overnight, clean |
 
 Power cycling the hub port cleared it for a while (it came back within hours).
 

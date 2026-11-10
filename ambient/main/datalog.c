@@ -23,38 +23,56 @@
 
 static const char *TAG = "sd";
 
-#define EVENTS_PATH     SD_MOUNT_POINT "/events.csv"
 #define READINGS_HEADER "timestamp,sensor,data_type,value,status\n"
-#define EVENTS_HEADER   "timestamp,source,event,detail\n"
 
 #define SENT_PATH       SD_MOUNT_POINT "/sent.txt"
 #define SAVE_US         (10 * 60 * 1000000LL)   // how often the send position is saved
-#define RAM_QUEUE_LEN   32      // events not on the card, waiting to be sent
+#define RAM_QUEUE_LEN   32      // events waiting to be sent
 
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;   // guards s_info
 static datalog_info_t s_info;
 
-// Sending: events not written to the card go from a RAM queue. Everything on
-// the card is sent from the card: events.csv, then the readings files, oldest
-// first. The position (the readings file, and the byte after the last acked
-// line in it and in events.csv) is saved in sent.txt every SAVE_US, so after
-// a reboot up to SAVE_US of lines are sent again. With no sent.txt (a new
-// card) everything on the card is sent.
+// Sending: events go from a RAM queue, ahead of readings; they're not
+// written to the card. Readings are sent from the card, oldest day file
+// first. The position (the readings file and the byte after its last acked
+// line) is saved in sent.txt every SAVE_US, so after a reboot up to SAVE_US of
+// lines are sent again. With no sent.txt (a new card) everything on the card
+// is sent. A day file is deleted once it's all sent and a newer one exists.
 static QueueHandle_t s_ram;
 static char s_cur[24];            // readings file being sent; "" none yet
-static long s_cur_off, s_ev_off;  // where the next line to send starts
+static long s_cur_off;            // where the next line to send starts
 static long s_next_off;           // after the line datalog_next returned
-static enum { FROM_NONE, FROM_RAM, FROM_EVENTS, FROM_READINGS } s_from;
-static char s_newest[24];         // readings file last written
+static int s_rfd = -1;            // s_cur, open for reading
+static enum { FROM_NONE, FROM_RAM, FROM_READINGS } s_from;
+static char s_today[40];          // today's readings file; "" before the first sample
+static char s_today_path[64];
+static int64_t s_today_day = -1;  // its UTC day number
 static bool s_loaded, s_dirty;
 static int64_t s_saved_us;
+
+#define LINE_END   -1             // read_line: no whole line left in the file
+#define LINE_ERROR -2             // read_line: the card couldn't be read
+
+void datalog_init(void)
+{
+    s_ram = xQueueCreate(RAM_QUEUE_LEN, DATALOG_MSG_LEN);
+}
+
+// The status line shows the file being sent.
+static void show_sent_file(void)
+{
+    portENTER_CRITICAL(&s_mux);
+    strlcpy(s_info.sent_file, s_cur, sizeof s_info.sent_file);
+    s_info.sent_bytes = (uint32_t)s_cur_off;
+    portEXIT_CRITICAL(&s_mux);
+}
 
 static void load_pos(void)
 {
     sd_lock();
     FILE *f = fopen(SENT_PATH, "r");
     if (f) {
-        if (fscanf(f, "%23s %ld %ld", s_cur, &s_cur_off, &s_ev_off) != 3 || s_cur[0] == '-') {
+        if (fscanf(f, "%23s %ld", s_cur, &s_cur_off) != 2 || s_cur[0] == '-') {
             s_cur[0] = '\0';
             s_cur_off = 0;
         }
@@ -62,14 +80,15 @@ static void load_pos(void)
     }
     sd_unlock();
     s_loaded = true;
+    show_sent_file();
 }
 
-// Fixed width, so each save overwrites the same bytes.
+// Fixed width, so each save overwrites the same bytes. A failed save is
+// tried again at the next ack.
 static void save_pos(void)
 {
     char line[48];
-    int n = snprintf(line, sizeof line, "%-23s %10ld %10ld\n", s_cur[0] ? s_cur : "-",
-                     s_cur_off, s_ev_off);
+    int n = snprintf(line, sizeof line, "%-23s %10ld\n", s_cur[0] ? s_cur : "-", s_cur_off);
     sd_lock();
     int fd = open(SENT_PATH, O_WRONLY | O_CREAT, 0644);
     bool ok = fd >= 0 && write(fd, line, n) == n && fsync(fd) == 0;
@@ -79,40 +98,65 @@ static void save_pos(void)
     sd_unlock();
     if (!ok) {
         ESP_LOGW(TAG, "can't save the send position: %s", strerror(errno));
+        return;
     }
     s_saved_us = esp_timer_get_time();
     s_dirty = false;
 }
 
-// The line starting at off in path, skipping header lines, into msg as
-// "<kind> <line>". Returns the offset after it, or -1 if there's no whole
-// line there.
-static long read_line(const char *path, long off, const char *kind, char *msg)
+// FatFs doesn't keep two handles on one file in step: a reader open across a
+// write to the same file doesn't see the new size. So the reader is closed
+// before each sample is written, and at a file switch.
+static void close_reader(void)
+{
+    if (s_rfd >= 0) {
+        sd_lock();
+        close(s_rfd);
+        sd_unlock();
+        s_rfd = -1;
+    }
+}
+
+// The line starting at off in s_cur, skipping header lines, into msg as
+// "data <line>". Returns the offset after it, LINE_END if there's no whole
+// line left (or the file is gone), or LINE_ERROR if the card couldn't be read.
+static long read_line(long off, char *msg)
 {
     char buf[DATALOG_MSG_LEN];
-    while (1) {
-        sd_lock();
-        int fd = open(path, O_RDONLY);
-        ssize_t n = fd >= 0 && lseek(fd, off, SEEK_SET) == off ? read(fd, buf, sizeof buf - 1) : -1;
-        if (fd >= 0) {
-            close(fd);
+    long rc = LINE_ERROR;
+    sd_lock();
+    if (s_rfd < 0) {
+        char path[64];
+        snprintf(path, sizeof path, SD_MOUNT_POINT "/%s", s_cur);
+        s_rfd = open(path, O_RDONLY);
+        if (s_rfd < 0 && errno == ENOENT) {
+            rc = LINE_END;
         }
-        sd_unlock();
-        if (n <= 0) {
-            return -1;
+    }
+    while (s_rfd >= 0) {
+        if (lseek(s_rfd, off, SEEK_SET) != off) {
+            break;
+        }
+        ssize_t n = read(s_rfd, buf, sizeof buf - 1);
+        if (n < 0) {
+            break;
         }
         buf[n] = '\0';
         char *end = strchr(buf, '\n');
         if (!end) {
-            return -1;
+            rc = LINE_END;
+            break;
         }
         *end = '\0';
         off += end - buf + 1;
         if (strncmp(buf, "timestamp,", 10) != 0) {
-            snprintf(msg, DATALOG_MSG_LEN, "%s %.150s", kind, buf);
-            return off;
+            snprintf(msg, DATALOG_MSG_LEN, "data %.150s", buf);
+            rc = off;
+            break;
         }
     }
+    sd_unlock();
+    return rc;
 }
 
 // The first readings file (YYYY-MM-DD.csv) named after `after`, into out.
@@ -140,39 +184,61 @@ static bool next_file(const char *after, char out[24])
 bool datalog_next(char *msg)
 {
     s_from = FROM_NONE;
-    if (s_ram && xQueuePeek(s_ram, msg, 0) == pdTRUE) {
+    if (xQueuePeek(s_ram, msg, 0) == pdTRUE) {
         s_from = FROM_RAM;
         return true;
     }
     if (!sd_usable()) {
+        close_reader();
         return false;
     }
     if (!s_loaded) {
         load_pos();
     }
-    if ((s_next_off = read_line(EVENTS_PATH, s_ev_off, "event", msg)) >= 0) {
-        s_from = FROM_EVENTS;
-        return true;
-    }
     while (1) {
         if (s_cur[0]) {
-            char path[64];
-            snprintf(path, sizeof path, SD_MOUNT_POINT "/%s", s_cur);
-            if ((s_next_off = read_line(path, s_cur_off, "data", msg)) >= 0) {
+            long rc = read_line(s_cur_off, msg);
+            if (rc >= 0) {
+                s_next_off = rc;
                 s_from = FROM_READINGS;
                 return true;
             }
-            if (strcmp(s_cur, s_newest) == 0) {
-                return false;             // all sent
+            if (rc == LINE_ERROR) {
+                close_reader();           // reopened and tried again at the next wake
+                return false;
+            }
+            // All of s_cur is sent. If it's today's file, or today's isn't
+            // known yet (no sample since boot), more may come: wait.
+            if (!s_today[0] || strcmp(s_cur, s_today) >= 0) {
+                return false;
             }
         }
         char next[24];
         if (!next_file(s_cur, next)) {
             return false;
         }
+        char done[64] = "";               // the finished file
+        if (s_cur[0]) {
+            snprintf(done, sizeof done, SD_MOUNT_POINT "/%s", s_cur);
+        }
+        close_reader();
         strlcpy(s_cur, next, sizeof s_cur);
         s_cur_off = 0;
-        s_dirty = true;
+        show_sent_file();
+        if (done[0]) {
+            // Save the move first, so a reboot never points at a deleted file.
+            save_pos();
+            sd_lock();
+            int rc = unlink(done);
+            sd_unlock();
+            if (rc == 0) {
+                ESP_LOGI(TAG, "deleted %s (all sent)", done);
+            } else if (errno != ENOENT) {
+                ESP_LOGW(TAG, "can't delete %s: %s", done, strerror(errno));
+            }
+        } else {
+            s_dirty = true;
+        }
     }
 }
 
@@ -181,18 +247,14 @@ void datalog_sent(void)
     char msg[DATALOG_MSG_LEN];
     if (s_from == FROM_RAM) {
         xQueueReceive(s_ram, msg, 0);
-    } else if (s_from == FROM_EVENTS) {
-        s_ev_off = s_next_off;
-        s_dirty = true;
     } else if (s_from == FROM_READINGS) {
         s_cur_off = s_next_off;
         s_dirty = true;
+        portENTER_CRITICAL(&s_mux);
+        s_info.sent_bytes = (uint32_t)s_cur_off;
+        portEXIT_CRITICAL(&s_mux);
     }
     s_from = FROM_NONE;
-    portENTER_CRITICAL(&s_mux);
-    strlcpy(s_info.sent_file, s_cur, sizeof s_info.sent_file);
-    s_info.sent_bytes = (uint32_t)s_cur_off;
-    portEXIT_CRITICAL(&s_mux);
     if (s_dirty && esp_timer_get_time() - s_saved_us >= SAVE_US) {
         save_pos();
     }
@@ -242,7 +304,7 @@ static bool can_write(void)
 
 void datalog_event(const char *source, const char *event, const char *fmt, ...)
 {
-    char detail[64], ts[32] = "", row[160];
+    char detail[64], ts[32] = "";
     va_list ap;
     va_start(ap, fmt);
     vsnprintf(detail, sizeof detail, fmt, ap);
@@ -250,23 +312,16 @@ void datalog_event(const char *source, const char *event, const char *fmt, ...)
     if (clock_is_set()) {
         fmt_utc(sensor_utc_us(), ts, sizeof ts);
     }
-    int n = snprintf(row, sizeof row, "%s,%s,%s,%s\n", ts, source, event, detail);
-    size_t len = n < (int)sizeof row ? n : sizeof row - 1;
-    if (can_write() && append(EVENTS_PATH, EVENTS_HEADER, row, len) >= 0) {
-        portENTER_CRITICAL(&s_mux);
-        s_info.events++;
-        portEXIT_CRITICAL(&s_mux);
-    } else {
-        // Not on the card: sent from RAM.
-        if (!s_ram) {
-            s_ram = xQueueCreate(RAM_QUEUE_LEN, DATALOG_MSG_LEN);
-        }
-        char msg[DATALOG_MSG_LEN];
-        snprintf(msg, sizeof msg, "event %.*s", (int)(len - 1), row);   // without the line end
-        if (xQueueSend(s_ram, msg, 0) != pdTRUE) {
-            ESP_LOGW(TAG, "queue full; not sent: %s", msg);
-        }
+    // Sent from RAM, not written to the card.
+    char msg[DATALOG_MSG_LEN];
+    snprintf(msg, sizeof msg, "event %s,%s,%s,%.64s", ts, source, event, detail);
+    if (xQueueSend(s_ram, msg, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "queue full; not sent: %s", msg);
+        return;
     }
+    portENTER_CRITICAL(&s_mux);
+    s_info.events++;
+    portEXIT_CRITICAL(&s_mux);
     ambient_wake();
 }
 
@@ -302,21 +357,28 @@ void datalog_sample(const sensor_result_t r[SENSOR_COUNT])
     char buf[512];
     size_t len = datalog_rows(r, buf, sizeof buf);
 
-    // One file per UTC day: YYYY-MM-DD.csv
-    char name[40], path[64];
-    time_t sec = (time_t)(r[0].utc_us / 1000000);
-    struct tm t;
-    gmtime_r(&sec, &t);
-    snprintf(name, sizeof name, "%04d-%02d-%02d.csv", t.tm_year + 1900, t.tm_mon + 1, t.tm_mday);
-    snprintf(path, sizeof path, SD_MOUNT_POINT "/%s", name);
-    long size = append(path, READINGS_HEADER, buf, len);
+    // One file per UTC day: YYYY-MM-DD.csv. The name is rebuilt only when
+    // the UTC day changes.
+    int64_t day = r[0].utc_us / 1000000 / 86400;
+    if (day != s_today_day) {
+        time_t sec = (time_t)(day * 86400);
+        struct tm t;
+        gmtime_r(&sec, &t);
+        snprintf(s_today, sizeof s_today, "%04d-%02d-%02d.csv", t.tm_year + 1900, t.tm_mon + 1,
+                 t.tm_mday);
+        snprintf(s_today_path, sizeof s_today_path, SD_MOUNT_POINT "/%s", s_today);
+        s_today_day = day;
+        portENTER_CRITICAL(&s_mux);
+        strlcpy(s_info.file, s_today, sizeof s_info.file);
+        portEXIT_CRITICAL(&s_mux);
+    }
+    close_reader();                   // so the next read sees this write
+    long size = append(s_today_path, READINGS_HEADER, buf, len);
     if (size < 0) {
         return;
     }
-    strlcpy(s_newest, name, sizeof s_newest);
     ambient_wake();
     portENTER_CRITICAL(&s_mux);
-    strlcpy(s_info.file, name, sizeof s_info.file);
     s_info.file_bytes = (uint32_t)size;
     s_info.rows += SENSOR_COUNT * SENSOR_MAX_VALUES;
     portEXIT_CRITICAL(&s_mux);
@@ -338,7 +400,7 @@ static bool plain_name(const char *name)
 int datalog_tail(const char *name, int lines)
 {
     if (!plain_name(name)) {
-        printf("give a file name in the card's root, e.g. events.csv\n");
+        printf("give a file name in the card's root, e.g. 2026-11-09.csv\n");
         return -1;
     }
     if (!sd_usable()) {

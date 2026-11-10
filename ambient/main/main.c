@@ -160,6 +160,7 @@ void app_main(void)
     // Excitation off before anything that could take time.
     thermistor_pin_init();
     s_loop_task = xTaskGetCurrentTaskHandle();
+    datalog_init();                 // before anything can log an event
 
     // ESP-IDF's own messages are built at warnings-and-errors only (see
     // sdkconfig.defaults); the app's informational lines are turned back on.

@@ -2,6 +2,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -20,7 +21,6 @@
 static const char *TAG = "clock";
 
 #define RESYNC_US    (3600LL * 1000000)
-#define STEP_LIMIT_US 1000000          // errors larger than this are stepped, not slewed
 #define EDGE_WAIT_US 1500000           // the seconds register must change within this
 
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -68,9 +68,8 @@ static int wait_edge(int64_t *edge_us)
     return -1;
 }
 
-// Sync the ESP32 clock to the DS3231 at its second edge. step: set the clock
-// outright (boot); otherwise slew, unless the error is over STEP_LIMIT_US.
-static int sync_from_ds3231(bool step)
+// Set the ESP32 clock to the DS3231 at its second edge.
+static int sync_from_ds3231(void)
 {
     int64_t edge;
     struct tm t;
@@ -83,22 +82,16 @@ static int sync_from_ds3231(bool step)
     int64_t sys_at_edge = sys_now_us() - (mono - edge);
     int64_t offset = ds_at_edge - sys_at_edge;
 
-    if (step || llabs(offset) > STEP_LIMIT_US) {
-        int64_t target = ds_at_edge + (esp_timer_get_time() - edge);
-        struct timeval tv = { .tv_sec = target / 1000000, .tv_usec = target % 1000000 };
-        settimeofday(&tv, NULL);
-        if (!step) {
-            ESP_LOGW(TAG, "ESP32 clock was %lld ms off the DS3231: stepped", (long long)(offset / 1000));
-            datalog_event("clock", "stepped", "%+lld ms", (long long)(offset / 1000));
-        }
-    } else {
-        struct timeval d = { .tv_sec = offset / 1000000, .tv_usec = offset % 1000000 };
-        adjtime(&d, NULL);
-        ESP_LOGI(TAG, "resynced from the DS3231: ESP32 was %+lld ms off, slewing", (long long)(offset / 1000));
+    int64_t target = ds_at_edge + (esp_timer_get_time() - edge);
+    struct timeval tv = { .tv_sec = target / 1000000, .tv_usec = target % 1000000 };
+    settimeofday(&tv, NULL);
+    bool was_set = clock_is_set();
+    if (was_set) {
+        ESP_LOGI(TAG, "resynced from the DS3231: ESP32 was %+lld ms off, set", (long long)(offset / 1000));
     }
     portENTER_CRITICAL(&s_mux);
     s_info.last_sync_up_s = uptime_s();
-    s_info.last_sync_ms = step ? 0 : (int32_t)(offset / 1000);
+    s_info.last_sync_ms = was_set ? (int32_t)(offset / 1000) : 0;
     portEXIT_CRITICAL(&s_mux);
     s_next_resync_us = esp_timer_get_time() + RESYNC_US;
     return 0;
@@ -147,7 +140,7 @@ int clock_init(void)
         fault_raise(FAULT_RTC, "invalid");
         return -1;
     }
-    if (sync_from_ds3231(true) != 0) {
+    if (sync_from_ds3231() != 0) {
         not_responding();
         return -1;
     }
@@ -157,7 +150,6 @@ int clock_init(void)
     char now[40];
     clock_now_str(now, sizeof now);
     ESP_LOGI(TAG, "set from the DS3231: %s", now);
-    datalog_event("clock", "set", "from DS3231");
     return 0;
 }
 
@@ -179,7 +171,7 @@ void clock_poll(void)
     if (!clock_is_set() || fault_get(NULL, NULL) || esp_timer_get_time() < s_next_resync_us) {
         return;
     }
-    if (sync_from_ds3231(false) != 0) {
+    if (sync_from_ds3231() != 0) {
         not_responding();
     }
 }
@@ -203,37 +195,34 @@ static bool parse_ack(const char *reply, int64_t *us)
     return true;
 }
 
-void clock_on_ack(const char *reply, int64_t rtt_us, bool auto_correct)
+void clock_on_ack(const char *reply, int64_t rtt_us)
 {
     if (fault_get(NULL, NULL)) {
         return;                           // acks never clear a fault
     }
     int64_t ack_us;
     if (!parse_ack(reply, &ack_us)) {
-        ESP_LOGW(TAG, "ack time not understood: %s", reply);
+        ESP_LOGW(TAG, "logserv time not understood: %s", reply);
         return;
     }
     int64_t offset = ack_us + rtt_us / 2 - sys_now_us();
-    portENTER_CRITICAL(&s_mux);
-    s_info.ack_seen = true;
-    s_info.ack_offset_ms = (int32_t)(offset / 1000);
-    s_info.ack_rtt_ms = (int32_t)(rtt_us / 1000);
-    portEXIT_CRITICAL(&s_mux);
-
     bool set = clock_is_set();
-    if (set && (!auto_correct || llabs(offset) <= CLOCK_CORRECT_MS * 1000LL)) {
-        return;
-    }
     if (set) {
-        struct timeval rem = { 0 };
-        adjtime(NULL, &rem);
-        if (rem.tv_sec != 0 || rem.tv_usec != 0) {
-            return;                       // still slewing from the last sync
+        portENTER_CRITICAL(&s_mux);
+        if (s_info.n_offsets == CLOCK_OFFSETS) {
+            memmove(s_info.offsets_ms, s_info.offsets_ms + 1, (CLOCK_OFFSETS - 1) * sizeof(int32_t));
+            s_info.n_offsets--;
+        }
+        s_info.offsets_ms[s_info.n_offsets++] = (int32_t)(offset / 1000);
+        s_info.ack_rtt_ms = (int32_t)(rtt_us / 1000);
+        portEXIT_CRITICAL(&s_mux);
+        if (llabs(offset) <= CLOCK_CORRECT_MS * 1000LL) {
+            return;
         }
     }
 
     if (set_ds3231(offset) != 0 || (!set && ds3231_clear_osf() != 0)
-        || sync_from_ds3231(!set) != 0) {
+        || sync_from_ds3231() != 0) {
         not_responding();
         return;
     }

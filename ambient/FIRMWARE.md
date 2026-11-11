@@ -33,7 +33,7 @@ The firmware can't time conversions around WiFi activity: beacon wakes and delay
 | Option | Effect | Decision |
 |---|---|---|
 | Power-save (`WIFI_PS_MIN_MODEM`) | Stays associated and wakes at each DTIM beacon; the AP buffers packets; IP and DHCP lease survive | On (the ESP-IDF default), except during each message exchange (below). Needed for the solar/battery version |
-| Power-save off for each exchange | `main.c` turns power save off before sending a message and back on after the ack or the 2 s timeout | In use. With power save on, the router holds the ack until the next beacon (up to about 100 ms), so the round trip is lopsided and the ack's time is up to about 50 ms wrong: enough to correct the DS3231 wrongly (seen 2026-11-08: −55 ms, then +51 ms). With it off the round trip was 11 ms |
+| Power-save off for each exchange | `main.c` turns power save off before sending a message and back on after the ack or the 2 s timeout | In use. With power save on, the router holds the ack until the next beacon (up to about 100 ms), so the round trip is lopsided and the logserv time is up to about 50 ms wrong: enough to correct the DS3231 wrongly (seen 2026-11-08: −55 ms, then +51 ms). With it off the round trip was 11 ms |
 | Radio off (`esp_wifi_stop()`) | Sockets die; reconnecting takes about 1 to 3 s with DHCP (a static IP is faster) | Only for sample intervals of minutes or more; not needed for EMI |
 
 ## Remote commands
@@ -69,9 +69,9 @@ Recommended: commands in the ack, unless replies within seconds are needed.
 
 ## Time
 
-- **Chain:** the listener's ack time corrects the DS3231, the DS3231 syncs the ESP32 clock, and the ESP32 clock (UTC, microseconds) stamps each reading. Each reading gets its own stamp with milliseconds, taken when its measurement finishes. The BMP388's temperature and pressure come from one measurement, so they share a stamp.
-- **ESP32 sync:** at boot the logger waits for the DS3231's next second edge (polling its seconds register) and sets the ESP32 clock to that second, to within about 1 ms. It resyncs the same way every hour, slewing with `adjtime` (ESP-IDF slews at 1/64 speed, so 50 ms takes about 3 s). An error over 1 s is stepped instead, with a warning.
-- **Ack:** the listener sends milliseconds. The logger takes the ack time plus half the measured round trip as the true time; the difference from its own clock is the ack offset, shown in `status`. WiFi power save is off during the exchange, so the round trip is short and even (Table 2). With `clock auto`, an offset over 50 ms makes the logger rewrite the DS3231 at a whole-second moment of true time, then resync the ESP32 from it. Writing the seconds register restarts the DS3231's 1 s countdown (datasheet). No correction is made while a slew is still running. With `clock report`, the offset is only shown.
+- **Chain:** logserv time corrects the DS3231, the DS3231 syncs the ESP32 clock, and the ESP32 clock (UTC, microseconds) stamps each reading. Each reading gets its own stamp with milliseconds, taken when its measurement finishes. The BMP388's temperature and pressure come from one measurement, so they share a stamp.
+- **ESP32 sync:** at boot the logger waits for the DS3231's next second edge (polling its seconds register) and sets the ESP32 clock to that second, to within about 1 ms. It sets it the same way every hour; no slewing, because clock changes and samples run one after another in the same loop, so a jump can't reorder readings.
+- **Logserv time test:** each ack carries logserv's time in milliseconds. The test runs on the ack of message 6 of 6 (`bmp388,pressure_pa`) of every Nth sample (`config clockn <N>`, 1-1000, default 1), and on any ack while the clock is unset. The logger takes logserv time plus half the measured round trip as the true time; the difference from its own clock is the logserv offset. `status` shows the last 10, oldest first. WiFi power save is off during the exchange, so the round trip is short and even (Table 2). An offset over 50 ms makes the logger rewrite the DS3231 at a whole-second moment of true time, then resync the ESP32 from it. Writing the seconds register restarts the DS3231's 1 s countdown (datasheet).
 - **Faults** (hard faults, as for the SD card, sent as the event `rtc,fault,<reason>`):
   - `missing`: the DS3231 doesn't answer at boot.
   - `invalid`: its oscillator-stop flag is set (it lost all power, so its time can't be trusted) and the card has data on it.
@@ -104,19 +104,18 @@ The ratio is kept so a later calibration of the thermistor can be applied to pas
 
 - **Write every sample:** open for append, write the sample's rows, `fsync`, close. A power cut or crash loses at most the sample being taken. The card does its own wear levelling; a worn card shows up only as a failed write (`sd=write_failed`).
 - **Readings:** one CSV per UTC day, `/sdcard/YYYY-MM-DD.csv`, one row per value: `timestamp,sensor,data_type,value,status`. A new file starts with that header. Why one row per value: [SYSTEM.md](SYSTEM.md#why-one-row-per-value).
-- **Events:** `/sdcard/events.csv`, kept for good: `timestamp,source,event,detail`. An event from before the clock is set has an empty timestamp.
+- **Events:** not written to the card; they're only sent (see "Sending from the card"). Format: `timestamp,source,event,detail`. An event from before the clock is set has an empty timestamp.
 
   | source | event | detail |
   |---|---|---|
-  | logger | boot | firmware version |
-  | clock | set | from DS3231 |
-  | clock | stepped / corrected | offset in ms |
+  | logger | boot | (none) |
+  | clock | corrected | offset in ms |
   | clock | set_from_ack | stop flag cleared |
   | clock | unset | waiting for ack |
   | thermistor, sht45, bmp388 | fail | reason; again when the reason changes |
   | thermistor, sht45, bmp388 | recover | after N failed |
   | supply | low / recovered | mV |
-  | sd, rtc | fault | reason (sd faults are sent only, not written) |
+  | sd, rtc | fault | reason |
 
 - **Failed readings:** a row for each of the sensor's data types with an empty value and the reason as the status (e.g. `nack`), so the gap is explicit in the data.
 - **`read` on the console isn't logged:** it's a diagnostic, used in tests; only scheduled samples go to the card.
@@ -129,32 +128,29 @@ The ratio is kept so a later calibration of the thermistor can be applied to pas
   | ratio | 5 | One ADC step is about 0.00004; every step is kept for later recalibration |
   | pressure_pa | 1 | 0.1 Pa, about 1 cm of altitude |
 
-- **Never deletes or formats** anything on the card.
+- **Deletes** a day file only once it's all sent and it isn't today's (see below). Never formats the card.
 
 ## Sending from the card
 
-Every reading and event on the card is sent to logserv from the card itself, one line at a time, each one acked before the next (`datalog.c`). Nothing is lost while logserv or WiFi is down, or over a reboot: the backlog goes out when the link is back.
+Readings are sent to logserv from the card, one line at a time, each one acked before the next (`datalog.c`). No reading is lost while logserv or WiFi is down, or over a reboot: the backlog goes out when the link is back.
 
-- **Order:** events not on the card (from before the clock is set, or during an SD fault) go first, from a small RAM queue (32). Then `events.csv`, then the readings files, oldest day first.
-- **Position:** `/sdcard/sent.txt` holds the readings file being sent and the byte after the last acked line in it and in `events.csv`, e.g. `2026-11-08.csv 15134 4210`. It's one fixed-width line, rewritten in place at most every 10 min, so it adds about 144 small writes a day.
-- **After a reboot:** sending restarts from `sent.txt`, so up to 10 min of lines go again. logserv ignores rows it already has (same timestamp, sensor and data_type; for events, all four fields) and prints them as `repeat`.
-- **No `sent.txt`** (a new card, or one from before this change): everything on the card is sent.
+- **Events:** sent from a RAM queue of 32, ahead of readings, each resent until acked. They're lost if the board reboots before they're acked; one logged while the queue is full is dropped (console: `queue full; not sent`).
+- **Order:** events first, then the readings files, oldest day first.
+- **Position:** `/sdcard/sent.txt` holds the readings file being sent and the byte after its last acked line, e.g. `2026-11-08.csv 15134`. It's one fixed-width line, rewritten in place at most every 10 min, so it adds about 144 small writes a day.
+- **Deleting a day file:** once a file is all sent and a newer day's file exists, `sent.txt` is moved to the next file and saved first, then the sent file is deleted (console: `deleted <file> (all sent)`). Today's file is never deleted. A read error is not taken as the end of a file, so it never causes a delete.
+- **After a reboot:** sending restarts from `sent.txt`, so up to 10 min of lines go again. logserv ignores rows it already has (same timestamp, sensor and data_type) and prints them as `repeat`.
+- **No `sent.txt`** (a new card): every day file on the card is sent.
 - **Rate:** about 30 messages a second, so a day at 30 s (17,280 readings) takes about 10 min.
 - **`status`** shows how far sending has got: `sent to    2026-11-09.csv byte 671791`.
-- **Weak spots:** a power cut in the middle of a write can leave half a line, which the next write joins: that one row is refused by logserv (it's still acked, so sending carries on). If `events.csv` is replaced by a shorter file, its events aren't sent until it grows past the saved position.
+- **Weak spots:** a power cut in the middle of a write can leave half a line, which the next write joins: that one row is refused by logserv (it's still acked, so sending carries on). Events not yet acked are lost on a reboot.
 
-Test 2026-11-09: a fresh logserv database, then the firmware flashed with no `sent.txt`. The whole card (11-07 to 11-09, 29,000 readings) reached the database at about 30 a second. After two reboots the resent lines all showed as `repeat` in logserv's output and none were stored twice. The gaps between samples in the database are only where the logger was off or rebooting (70 to 85 s per reboot).
+Test 2026-11-09 (be883d5, sending from the card): a fresh logserv database, then the firmware flashed with no `sent.txt`. The whole card (11-07 to 11-09, 29,000 readings) reached the database at about 30 a second. After two reboots the resent lines all showed as `repeat` in logserv's output and none were stored twice. The gaps between samples in the database are only where the logger was off or rebooting (70 to 85 s per reboot).
+
+Test 2026-11-11 (d557c1e, events from RAM, delete when sent): card and logserv database emptied, firmware flashed at 15:06Z with logserv stopped. After logserv was started (15:08Z), the `boot d557c1e` and `clock set` events arrived from the RAM queue, and readings arrived (15:17Z sample, all `ok`). Not yet checked: `2026-11-11.csv` deleted after 00:00 UTC.
 
 ## Open items
 
-- **Clock test, remediation:** set the oscillator-stop flag (DS3231 battery out with the board unpowered), restart with an empty card, and check the first ack sets the time and clears the flag. Skipped: needs the board out of the warm box; do it next time it's removed.
-- **Clock test, invalid clock with data on the card:** should be a hard fault (`invalid`). Needs the DS3231 battery out with the board unpowered, so the board out of the warm box.
-- **Clock drift (measured 2026-11-08):** the ESP32 drifts about 40 ms an hour against the DS3231 (the hourly `resynced from the DS3231` line), so reading stamps can be up to about 40 ms off just before a resync. The DS3231 lost about 46 ms in 4.5 h against logserv (about 2.8 ppm; the DS3231SN is rated ±2 ppm, the DS3231M ±5 ppm), so the ack corrects it by about +50 ms every 4 to 5 hours. That's within the design (±50 ms). Options for tighter time, for later:
+- **Clock drift (measured 2026-11-08):** the ESP32 drifts about 40 ms an hour against the DS3231 (the hourly `resynced from the DS3231` line), so reading stamps can be up to about 40 ms off just before a resync. The DS3231 lost about 46 ms in 4.5 h against logserv (about 2.8 ppm; the chip, a DS3232SN, is rated ±2 ppm from 0 to 40 °C plus about ±1 ppm of aging in the first year), so the ack corrects it by about +50 ms every 4 to 5 hours. That's within the design (±50 ms). Options for tighter time, for later:
   1. **Resync the ESP32 every 10 min** instead of hourly (`RESYNC_US` in `clock.c`): stamps within about 7 ms of the DS3231. The ESP32's drift is the larger error.
   2. **Lower the correction limit** from 50 ms to about 20 ms (`CLOCK_CORRECT_MS`): safe now that acks are good to about ±6 ms (12 ms round trip).
-  3. **Trim the DS3231's aging register** (about 0.1 ppm a step; around −28 for this chip, to be measured over a day or two): fewer corrections, and better time when logserv or WiFi is down for long. It fixes only the average rate; the ack corrections are still needed.
-- **Clock test, `clock report`:** with an offset over 50 ms, check `report` leaves the DS3231 alone. Not yet run.
-- **SD test, not-empty card:** with files on the card, `status` should say `not empty at boot`. Runnable now; the 2026-11-08 `status` showed it, not yet declared passed.
-- **Card full and low:** not built. A full card shows as `sd=write_failed`; there is no `sd low` warning.
-- **Thermistor noise test:** the noise test in WIRING.md (build step 3), with WiFi idle and with WiFi plus SD writes (`ads1115-probe` does both).
-- **Alerting (separate project):** a sensor failure or hard fault shows only on the console, on the card and in logserv's database. A way to be told (email, phone) is still to be chosen.
+  3. **Trim the DS3231's aging register** with the console command `age [n]` (one write; the backup battery keeps it) (about 0.1 ppm a step; around −28 for this chip, to be measured over a day or two): fewer corrections, and better time when logserv or WiFi is down for long. It fixes only the average rate; the ack corrections are still needed.

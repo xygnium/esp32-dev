@@ -25,5 +25,12 @@ int ds3231_write(const struct tm *utc);
 
 int ds3231_clear_osf(void);
 
+// Aging offset (register 0x10), kept by the backup battery. About 0.1 ppm a
+// step at 25 C; positive slows the clock, negative speeds it up. The write
+// forces a temperature conversion so it takes effect now (if one is already
+// running, it takes effect at the next automatic one, within 64 s).
+int ds3231_read_aging(int8_t *v);
+int ds3231_write_aging(int8_t v);
+
 
 #endif

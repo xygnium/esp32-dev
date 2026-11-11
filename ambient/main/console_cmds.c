@@ -17,6 +17,7 @@
 #include "ambient.h"
 #include "clock.h"
 #include "datalog.h"
+#include "ds3231.h"
 #include "fault.h"
 #include "sd.h"
 #include "sensors.h"
@@ -256,15 +257,20 @@ static int cmd_status(int argc, char **argv)
         clock_now_str(now, sizeof now);
         printf("clock      %s, DS3231 synced %lld s ago", now,
                (long long)(esp_timer_get_time() / 1000000 - ck.last_sync_up_s));
-        if (ck.ack_seen) {
-            printf(", last ack offset %+ld ms (round trip %ld ms)", (long)ck.ack_offset_ms,
-                   (long)ck.ack_rtt_ms);
+        if (ck.n_offsets > 0) {
+            printf(", round trip %ld ms", (long)ck.ack_rtt_ms);
         }
         if (ck.correction_up_s >= 0) {
             printf(", DS3231 corrected %+ld ms at uptime %lld s", (long)ck.correction_ms,
                    (long long)ck.correction_up_s);
         }
         printf("\n");
+        printf("offsets    logserv minus ESP32, last %d tests, oldest first, every %u samples:",
+               ck.n_offsets, cfg.clock_n);
+        for (int i = 0; i < ck.n_offsets; i++) {
+            printf(" %+ld", (long)ck.offsets_ms[i]);
+        }
+        printf(" ms\n");
     }
 
     if (wifi_is_connected()) {
@@ -365,8 +371,8 @@ static void config_print(void)
     printf("\n");
     printf("window     %02u:%02u-%02u:%02u UTC   (not used yet)\n",
            cfg.window_start / 60, cfg.window_start % 60, cfg.window_end / 60, cfg.window_end % 60);
-    printf("clock      %s\n", cfg.clock_auto ? "auto" : "report");
     print_listener(&cfg);
+    printf("clockn     %u   (logserv time test every N samples)\n", cfg.clock_n);
     printf("lowv       %lu.%02lu V   (supply-low threshold)\n", (unsigned long)(cfg.low_mv / 1000),
            (unsigned long)(cfg.low_mv % 1000 / 10));
     if (cfg.wifi_ssid[0] == '\0') {
@@ -381,8 +387,8 @@ static int config_usage(void)
     printf("usage:\n"
            "  config get\n"
            "  config interval <sample>      e.g. 2m; units s, m or h, bare number = seconds; 15 s-1 h\n"
+           "  config clockn <N>             logserv time test every N samples (1-1000)\n"
            "  config window <HH:MM> <HH:MM> send window in UTC; end before start wraps midnight\n"
-           "  config clock auto|report      let the ack's time correct the clock, or only report\n"
            "  config listener <ip> <port>   where to send\n"
            "  config lowv <volts>           supply-low threshold, e.g. 4.6 (3.0-5.5 V)\n"
            "  config wifi <ssid> <password> WiFi network; quote values with spaces, \"\" for none\n");
@@ -410,6 +416,14 @@ static int cmd_config(int argc, char **argv)
         ambient_wake();               // re-plan the next sample with the new interval
         return rc;
     }
+    if (strcmp(what, "clockn") == 0 && argc == 3) {
+        uint32_t n;
+        if (!parse_u32(argv[2], &n) || n < 1 || n > 1000) {
+            printf("clockn must be 1-1000\n");
+            return 1;
+        }
+        return report(settings_set_clock_n((uint16_t)n));
+    }
     if (strcmp(what, "window") == 0 && argc == 4) {
         uint16_t a, b;
         if (!parse_hhmm(argv[2], &a) || !parse_hhmm(argv[3], &b)) {
@@ -417,16 +431,6 @@ static int cmd_config(int argc, char **argv)
             return 1;
         }
         return report(settings_set_window(a, b));
-    }
-    if (strcmp(what, "clock") == 0 && argc == 3) {
-        if (strcmp(argv[2], "auto") == 0) {
-            return report(settings_set_clock_auto(true));
-        }
-        if (strcmp(argv[2], "report") == 0) {
-            return report(settings_set_clock_auto(false));
-        }
-        printf("clock must be auto or report\n");
-        return 1;
     }
     if (strcmp(what, "listener") == 0 && argc == 4) {
         uint32_t port;
@@ -478,6 +482,34 @@ static int cmd_quiet(int argc, char **argv)
     return 0;
 }
 
+// --- age ---
+
+static int cmd_age(int argc, char **argv)
+{
+    if (argc == 2) {
+        char *end;
+        long v = strtol(argv[1], &end, 10);
+        if (*end != '\0' || v < -128 || v > 127) {
+            printf("age must be -128 to 127\n");
+            return 1;
+        }
+        if (ds3231_write_aging((int8_t)v) != 0) {
+            printf("DS3231 write failed\n");
+            return 1;
+        }
+    } else if (argc != 1) {
+        printf("usage: age [n]\n");
+        return 1;
+    }
+    int8_t now;
+    if (ds3231_read_aging(&now) != 0) {
+        printf("DS3231 read failed\n");
+        return 1;
+    }
+    printf("age        %d   (about 0.1 ppm a step; negative speeds the clock up)\n", now);
+    return 0;
+}
+
 // --- reboot ---
 
 static int cmd_reboot(int argc, char **argv)
@@ -501,6 +533,8 @@ int console_start(void)
           .hint = "[file [lines]]", .func = cmd_tail },
         { .command = "quiet",  .help = "Hide (on) or show (off) successful sends on this console; on at boot",
           .hint = "[on|off]", .func = cmd_quiet },
+        { .command = "age",    .help = "Show the DS3231 aging offset, or set it: age [-128..127]",
+          .func = cmd_age },
         { .command = "reboot", .help = "Restart the logger; settings are kept",       .func = cmd_reboot },
     };
 

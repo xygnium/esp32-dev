@@ -29,7 +29,7 @@ typedef struct {
     uint32_t sample_s;        // seconds between samples (not used until sensors are read)
     uint16_t window_start;    // push window, minutes after 00:00 UTC (0-1439)
     uint16_t window_end;      // minutes after 00:00 UTC (1-1440); end < start wraps past midnight
-    bool clock_auto;          // true: the ack's time corrects the clock; false: only reported
+    uint16_t clock_n;         // the logserv time test runs every Nth sample (1-1000)
     uint32_t low_mv;          // supply-low threshold for VIN, mV
 } settings_t;
 
@@ -50,10 +50,10 @@ void settings_get(settings_t *out);
 // or that it was applied but couldn't be saved.
 const char *settings_set_interval(uint32_t sample_s);
 const char *settings_set_window(uint16_t start_min, uint16_t end_min);
-const char *settings_set_clock_auto(bool on);
 const char *settings_set_listener(const char *host, uint16_t port);
 const char *settings_set_wifi(const char *ssid, const char *pass);
 const char *settings_set_low_mv(uint32_t mv);
+const char *settings_set_clock_n(uint16_t n);
 
 
 #endif

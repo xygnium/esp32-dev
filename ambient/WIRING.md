@@ -99,6 +99,8 @@ There are no more colors, so orange and yellow are reused. 30 AWG wire is too th
 
 ### DS3231
 
+The chip is marked DS3232SN: the DS3231 with 236 bytes of SRAM added, same registers and accuracy (±2 ppm from 0 to 40 °C). The code and docs call it the DS3231.
+
 **Table 6: DS3231 connections**
 
 | Board pin | Goes to | Wire color |

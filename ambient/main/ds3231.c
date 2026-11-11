@@ -11,8 +11,12 @@ static const char *TAG = "ds3231";
 #define XFER_TIMEOUT_MS 100
 
 #define REG_SECONDS     0x00
+#define REG_CONTROL     0x0E
+#define CONTROL_CONV    0x20
 #define REG_STATUS      0x0F
 #define STATUS_OSF      0x80
+#define STATUS_BSY      0x04
+#define REG_AGING       0x10
 
 static i2c_master_dev_handle_t s_dev;
 
@@ -126,3 +130,29 @@ int ds3231_clear_osf(void)
     return write_regs(buf, sizeof buf);
 }
 
+int ds3231_read_aging(int8_t *v)
+{
+    uint8_t r;
+    if (read_regs(REG_AGING, &r, 1) != 0) {
+        return -1;
+    }
+    *v = (int8_t)r;
+    return 0;
+}
+
+int ds3231_write_aging(int8_t v)
+{
+    uint8_t buf[2] = { REG_AGING, (uint8_t)v };
+    uint8_t ctl, status;
+    if (write_regs(buf, sizeof buf) != 0 || read_regs(REG_STATUS, &status, 1) != 0) {
+        return -1;
+    }
+    if (status & STATUS_BSY) {
+        return 0;                         // a conversion is running; the next one applies it
+    }
+    if (read_regs(REG_CONTROL, &ctl, 1) != 0) {
+        return -1;
+    }
+    uint8_t conv[2] = { REG_CONTROL, (uint8_t)(ctl | CONTROL_CONV) };
+    return write_regs(conv, sizeof conv);
+}

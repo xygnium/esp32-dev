@@ -11,7 +11,8 @@
 // hex digits>") and sends the same message
 // again every RETRY_S until it is acked, then the next. Events go ahead of
 // readings. Sampling carries on meanwhile; unsent messages wait in RAM.
-// Each ack's time, plus half the round trip, is passed to the clock.
+// The ack of message 6 of 6 of every Nth sample (and any ack while the clock
+// is unset) passes its logserv time and round trip to the clock.
 //
 // SD card (sd.c) and clock (clock.c) faults are hard faults (fault.c):
 // sampling stops, and the fault goes to the listener as an event
@@ -30,7 +31,6 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_app_desc.h"
 #include "esp_log.h"
 #include "esp_rom_crc.h"
 #include "esp_wifi.h"
@@ -117,6 +117,8 @@ static uint16_t crc16(const char *p, size_t len)
     return ~esp_rom_crc16_be((uint16_t)~0x0000, (const uint8_t *)p, len);
 }
 
+static uint32_t s_samples_acked;    // message 6 of 6 acks since boot
+
 // Send one message and wait for its ack. True if acked.
 static bool send_one(const settings_t *cfg, const char *msg, uint32_t seq)
 {
@@ -128,7 +130,7 @@ static bool send_one(const settings_t *cfg, const char *msg, uint32_t seq)
     size_t reply_len = 0;
     // WiFi power save off for the exchange: with it on, the router holds the
     // ack until the next beacon (up to ~100 ms), so the round trip is
-    // lopsided and the ack's time is no good for the clock.
+    // lopsided and logserv time is no good for the clock.
     esp_wifi_set_ps(WIFI_PS_NONE);
     int64_t sent_us = esp_timer_get_time();
     int rc = wifi_udp_exchange(cfg->listener_host, cfg->listener_port, msg, strlen(msg),
@@ -151,7 +153,15 @@ static bool send_one(const settings_t *cfg, const char *msg, uint32_t seq)
         ESP_LOGI(TAG, "sent: %s", msg);
     }
     record(PUSH_OK, seq, reply);
-    clock_on_ack(reply, rtt_us, cfg->clock_auto);
+    // The logserv time test: message 6 of 6 of every Nth sample, or any ack
+    // while the clock is unset (it sets the clock).
+    if (strncmp(msg, "data ", 5) == 0 && strstr(msg, ",bmp388,pressure_pa,") != NULL) {
+        if (++s_samples_acked % cfg->clock_n == 0) {
+            clock_on_ack(reply, rtt_us);
+        }
+    } else if (!clock_is_set()) {
+        clock_on_ack(reply, rtt_us);
+    }
     return true;
 }
 
@@ -159,6 +169,7 @@ void app_main(void)
 {
     // Excitation off before anything that could take time.
     thermistor_pin_init();
+    vTaskDelay(pdMS_TO_TICKS(3000));  // hard 3 s delay at power up
     s_loop_task = xTaskGetCurrentTaskHandle();
     datalog_init();                 // before anything can log an event
 
@@ -185,7 +196,7 @@ void app_main(void)
     sd_init();
     clock_init();
     sensors_init();
-    datalog_event("logger", "boot", "%s", esp_app_get_description()->version);
+    datalog_event("logger", "boot", "%s", "");
 
     int wrc = wifi_connect(cfg.wifi_ssid, cfg.wifi_pass, CONNECT_TIMEOUT_MS);
     if (wrc == -1) {

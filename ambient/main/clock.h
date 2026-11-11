@@ -4,14 +4,13 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-// Time chain: the listener's ack time corrects the DS3231, the DS3231 syncs
+// Time chain: logserv time corrects the DS3231, the DS3231 syncs
 // the ESP32 clock, and the ESP32 clock (UTC, microseconds) stamps readings.
 //
 // - Boot: wait for the DS3231's next second edge and set the ESP32 clock to
-//   that second. Resync the same way every hour, slewing with adjtime (no
-//   backward jumps) unless the error is over 1 s.
-// - Ack: the true time is the ack time plus half the round trip. With
-//   `clock auto` and an error over CLOCK_CORRECT_MS, the DS3231 is rewritten
+//   that second. Reset it the same way every hour.
+// - Ack: the true time is logserv time plus half the round trip. With
+//   an error over CLOCK_CORRECT_MS, the DS3231 is rewritten
 //   at a whole-second moment and the ESP32 resynced from it.
 // - Faults (fault.h, source "rtc"): DS3231 missing; invalid (oscillator-stop
 //   flag set) with data on the card; or failing a read while running
@@ -33,16 +32,20 @@ int64_t clock_next_due_us(void);
 // The hourly resync, when due.
 void clock_poll(void);
 
-// After an acked push: reply is the ack text, rtt_us the round trip.
-void clock_on_ack(const char *reply, int64_t rtt_us, bool auto_correct);
+// The logserv time test, on an ack: reply is the ack text, rtt_us the round trip.
+// main.c calls it on message 6 of every Nth sample (config clockn), and on any
+// ack while the clock is unset.
+void clock_on_ack(const char *reply, int64_t rtt_us);
+
+#define CLOCK_OFFSETS 10
 
 typedef struct {
     bool set;
     int64_t last_sync_up_s;       // uptime of the last DS3231 sync; -1 none
     int32_t last_sync_ms;         // DS3231 minus ESP32 at that sync
-    bool ack_seen;
-    int32_t ack_offset_ms;        // ack time (+ rtt/2) minus ESP32, last ack
-    int32_t ack_rtt_ms;
+    int32_t offsets_ms[CLOCK_OFFSETS];  // logserv time (+ rtt/2) minus ESP32, last tests, oldest first
+    int n_offsets;                // how many of offsets_ms are filled
+    int32_t ack_rtt_ms;           // round trip of the last test
     int64_t correction_up_s;      // uptime of the last DS3231 correction; -1 none
     int32_t correction_ms;        // how far it moved the DS3231
 } clock_info_t;

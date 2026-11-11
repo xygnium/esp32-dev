@@ -1,6 +1,6 @@
 # How the system works
 
-One ESP32 logger reads three sensors every 2 minutes, keeps everything on its SD card, and sends each reading and event to logserv on dev10, which stores them in SQLite.
+One ESP32 logger reads three sensors every 2 minutes, keeps its readings on its SD card until they're sent, and sends each reading and event to logserv on dev10, which stores them in SQLite.
 
 ```
  Sensors ─────────────►  Logger (ESP32)  ── data / event ──►  logserv (dev10)
@@ -9,17 +9,17 @@ One ESP32 logger reads three sensors every 2 minutes, keeps everything on its SD
                                │ written first                     ▼
  DS3231 clock ──────────►      ▼                                 SQLite
  sets ESP32 time hourly     SD card                        readings + events
-                         day CSVs + events.csv
+                         day CSVs (deleted once sent)
 ```
 
 ## Logger (ESP32)
 
 - **Sensors:** thermistor (via the ADS1115), SHT45 (temperature, humidity), BMP388 (temperature, pressure). Each reading gets its own UTC timestamp in milliseconds.
-- **Readings file:** one CSV per UTC day, `YYYY-MM-DD.csv`, one row per reading: `timestamp,sensor,data_type,value,status`.
-- **Events file:** `events.csv`, one row per event: `timestamp,source,event,detail`. Events are boot, clock set or corrected, sensor fail or recover, supply low or recovered, and faults.
-- **Clock:** the DS3231 sets the ESP32 clock at boot and every hour. Each ack from logserv carries its time; if the logger is off by more than 50 ms, it corrects the DS3231.
+- **Readings file:** one CSV per UTC day, `YYYY-MM-DD.csv`, one row per reading: `timestamp,sensor,data_type,value,status`. A past day's file is deleted once all of it is sent.
+- **Events:** `timestamp,source,event,detail`, kept in RAM until sent, not on the card. Events are boot, clock set or corrected, sensor fail or recover, supply low or recovered, and faults.
+- **Clock:** the DS3231 sets the ESP32 clock at boot and every hour. Every ack carries logserv's time; on message 6 of 6 of every Nth sample the logger compares it with its own, and if it's off by more than 50 ms, it corrects the DS3231.
 - **Console:** WiFi, logserv's address and the sample interval are set over the USB serial console. `status` shows the current state.
-- **WiFi power save** is on, except while a message waits for its ack, so the ack's time is good for the clock. Details: [FIRMWARE.md](FIRMWARE.md).
+- **WiFi power save** is on, except while a message waits for its ack, so logserv time is good for the clock. Details: [FIRMWARE.md](FIRMWARE.md).
 
 ## Why one row per value
 
@@ -55,7 +55,7 @@ The logger sends one message at a time over UDP and waits for its ack before sen
 - **Ack:** `ack <UTC time> <CRC-16 of the message>` (CRC-16/XMODEM, 4 hex digits); a reply that doesn't match doesn't count.
 - **No ack within 2 s:** the same message is sent again every 10 s, forever, until it's acked.
 - **Order:** events go ahead of readings.
-- **While waiting:** sampling and card writes carry on. Messages are sent from the card, so a backlog of any length goes out when logserv is back; `sent.txt` on the card keeps the position (FIRMWARE.md, "Sending from the card"). Events not on the card wait in a RAM queue of 32.
+- **While waiting:** sampling and card writes carry on. Readings are sent from the card, so a backlog of any length goes out when logserv is back; `sent.txt` on the card keeps the position (FIRMWARE.md, "Sending from the card"). Events wait in a RAM queue of 32 and are lost on a reboot.
 
 ## logserv (dev10)
 
@@ -71,13 +71,8 @@ The logger sends one message at a time over UDP and waits for its ack before sen
 | Fault | What the logger does |
 | --- | --- |
 | Sensor fails | Rows with an empty value and the reason as status, plus a `fail` event; the others carry on; tried again next sample; `recover` event when it works |
-| SD card missing, not mounting, failing, full | Stops sampling; sends `sd,fault,<reason>` (not written: the card is the problem); only a reboot clears it |
+| SD card missing, not mounting, failing, full | Stops sampling; sends `sd,fault,<reason>`; only a reboot clears it |
 | DS3231 missing, failing, or lost power with data on the card | Stops sampling; sends `rtc,fault,<reason>`; only a reboot clears it |
 | DS3231 lost power, card empty (after a fix) | Clock unset: sends `clock,unset`; the first ack sets the time and sampling starts |
 
 An event from before the clock is set has an empty timestamp.
-
-## Not done yet
-
-- No alerting (email, phone) when something fails.
-- No warning when the card is nearly full; a full card shows as `sd,fault,write_failed`.

@@ -69,13 +69,19 @@ Recommended: commands in the ack, unless replies within seconds are needed.
 
 ## Time
 
-- **Chain:** logserv time corrects the DS3231, the DS3231 syncs the ESP32 clock, and the ESP32 clock (UTC, microseconds) stamps each reading. Each reading gets its own stamp with milliseconds, taken when its measurement finishes. The BMP388's temperature and pressure come from one measurement, so they share a stamp.
-- **ESP32 sync:** at boot the logger waits for the DS3231's next second edge (polling its seconds register) and sets the ESP32 clock to that second, to within about 1 ms. It sets it the same way every hour; no slewing, because clock changes and samples run one after another in the same loop, so a jump can't reorder readings.
-- **Logserv time test:** each ack carries logserv's time in milliseconds. The test runs on the ack of message 6 of 6 (`bmp388,pressure_pa`) of every Nth sample (`config clockn <N>`, 1-1000, default 1), and on any ack while the clock is unset. The logger takes logserv time plus half the measured round trip as the true time; the difference from its own clock is the logserv offset. `status` shows the last 10, oldest first. WiFi power save is off during the exchange, so the round trip is short and even (Table 2). An offset over 50 ms makes the logger rewrite the DS3231 at a whole-second moment of true time, then resync the ESP32 from it. Writing the seconds register restarts the DS3231's 1 s countdown (datasheet).
+- **Chain:** logserv time sets the DS3231, the DS3231 sets the ESP32 clock, and the ESP32 clock (UTC, microseconds) stamps each reading. Each reading gets its own stamp with milliseconds, taken when its measurement finishes. The BMP388's temperature and pressure come from one measurement, so they share a stamp.
+- **Boot:** the logger waits for the DS3231's next second edge (polling its seconds register) and sets the ESP32 clock to that second, to within about 1 ms.
+- **Sync to logserv:** on the first ack after boot, and on the first ack 24 h after the last sync. Each ack carries logserv's time in milliseconds. WiFi power save is off during the exchange, so the round trip is short and even (Table 2).
+  1. True time when the ack arrived = logserv time + half the round trip.
+  2. The logger catches the DS3231's next tick. The DS3231's time when the ack arrived = the tick's second − (ESP32 timer at the tick − ESP32 timer at the ack). Logserv minus DS3231 is the sync's diff, good to about ±6 ms (half the round trip, plus catching the tick).
+  3. It waits until true time reaches the next whole second and writes the DS3231. Writing the seconds register restarts its 1 s countdown (datasheet).
+  4. It sets the ESP32 clock from the DS3231, as at boot.
+- **Sync record:** `status` shows the diff of the last 10 syncs with their dates, oldest first (`syncs` line). They're kept in NVS, so they survive a reboot. A reboot adds a sync, so the 10 aren't always a day apart.
+- **`age [n]`:** shows or sets the DS3231's aging register (about 0.1 ppm a step; the backup battery keeps it).
 - **Faults** (hard faults, as for the SD card, sent as the event `rtc,fault,<reason>`):
   - `missing`: the DS3231 doesn't answer at boot.
   - `invalid`: its oscillator-stop flag is set (it lost all power, so its time can't be trusted) and the card has data on it.
-  - `not_responding`: a read fails while running, including at the hourly resync.
+  - `not_responding`: a read fails while running, including at a sync.
   - Acks never clear a fault.
 - **Remediation** for a failed clock: replace the board or battery, reformat the card on a PC, and restart. With the flag set and an empty card, the logger treats the restart as remediated: the clock is unset, `status` shows `clock  not set (waiting for ack)`, and the logger sends a `clock,unset` event, resent every 10 s until acked. That ack sets the DS3231, then the flag is cleared and the ESP32 synced. Sampling starts once the clock is set. Data from before a detected fault isn't used.
 
@@ -109,8 +115,7 @@ The ratio is kept so a later calibration of the thermistor can be applied to pas
   | source | event | detail |
   |---|---|---|
   | logger | boot | (none) |
-  | clock | corrected | offset in ms |
-  | clock | set_from_ack | stop flag cleared |
+  | clock | synced | logserv minus DS3231 before the sync, ms; none when the DS3231 had no valid time |
   | clock | unset | waiting for ack |
   | thermistor, sht45, bmp388 | fail | reason; again when the reason changes |
   | thermistor, sht45, bmp388 | recover | after N failed |
@@ -150,7 +155,4 @@ Test 2026-11-11 (d557c1e, events from RAM, delete when sent): card and logserv d
 
 ## Open items
 
-- **Clock drift (measured 2026-11-08):** the ESP32 drifts about 40 ms an hour against the DS3231 (the hourly `resynced from the DS3231` line), so reading stamps can be up to about 40 ms off just before a resync. The DS3231 lost about 46 ms in 4.5 h against logserv (about 2.8 ppm; the chip, a DS3232SN, is rated ±2 ppm from 0 to 40 °C plus about ±1 ppm of aging in the first year), so the ack corrects it by about +50 ms every 4 to 5 hours. That's within the design (±50 ms). Options for tighter time, for later:
-  1. **Resync the ESP32 every 10 min** instead of hourly (`RESYNC_US` in `clock.c`): stamps within about 7 ms of the DS3231. The ESP32's drift is the larger error.
-  2. **Lower the correction limit** from 50 ms to about 20 ms (`CLOCK_CORRECT_MS`): safe now that acks are good to about ±6 ms (12 ms round trip).
-  3. **Trim the DS3231's aging register** with the console command `age [n]` (one write; the backup battery keeps it) (about 0.1 ppm a step; around −28 for this chip, to be measured over a day or two): fewer corrections, and better time when logserv or WiFi is down for long. It fixes only the average rate; the ack corrections are still needed.
+None.

@@ -8,7 +8,7 @@ One ESP32 logger reads three sensors every 2 minutes, keeps its readings on its 
  BMP388                  2 min                                     │ --db
                                │ written first                     ▼
  DS3231 clock ──────────►      ▼                                 SQLite
- sets ESP32 time hourly     SD card                        readings + events
+ sets ESP32 time           SD card                        readings + events
                          day CSVs (deleted once sent)
 ```
 
@@ -16,8 +16,8 @@ One ESP32 logger reads three sensors every 2 minutes, keeps its readings on its 
 
 - **Sensors:** thermistor (via the ADS1115), SHT45 (temperature, humidity), BMP388 (temperature, pressure). Each reading gets its own UTC timestamp in milliseconds.
 - **Readings file:** one CSV per UTC day, `YYYY-MM-DD.csv`, one row per reading: `timestamp,sensor,data_type,value,status`. A past day's file is deleted once all of it is sent.
-- **Events:** `timestamp,source,event,detail`, kept in RAM until sent, not on the card. Events are boot, clock set or corrected, sensor fail or recover, supply low or recovered, and faults.
-- **Clock:** the DS3231 sets the ESP32 clock at boot and every hour. Every ack carries logserv's time; on message 6 of 6 of every Nth sample the logger compares it with its own, and if it's off by more than 50 ms, it corrects the DS3231.
+- **Events:** `timestamp,source,event,detail`, kept in RAM until sent, not on the card. Events are boot, clock synced, sensor fail or recover, supply low or recovered, and faults.
+- **Clock:** every ack carries logserv's time. On the first ack after boot and every 24 h after that, logserv's time sets the DS3231, and the DS3231 sets the ESP32 clock. `status` shows how far the DS3231 was from logserv at each of the last 10 syncs.
 - **Console:** WiFi, logserv's address and the sample interval are set over the USB serial console. `status` shows the current state.
 - **WiFi power save** is on, except while a message waits for its ack, so logserv time is good for the clock. Details: [FIRMWARE.md](FIRMWARE.md).
 

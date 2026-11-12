@@ -21,7 +21,6 @@ static const char *TAG = "settings";
 #define K_SSID      "wifi_ssid"
 #define K_PASS      "wifi_pass"
 #define K_LOWV      "low_mv"
-#define K_CLOCKN    "clock_n"
 
 static settings_t s_cur;
 static SemaphoreHandle_t s_lock;
@@ -33,7 +32,6 @@ static void set_defaults(settings_t *s)
     s->sample_s = 120;
     s->window_start = 0;                  // 00:00-24:00 UTC: always, until a window is
     s->window_end = SETTINGS_DAY_MIN;     // set; not enforced before stage 22
-    s->clock_n = 1;
     s->low_mv = 4600;                     // provisional; set from normal readings (plan)
 }
 
@@ -43,11 +41,6 @@ static const char *check_sample(uint32_t v)
 {
     return (v < SETTINGS_SAMPLE_MIN_S || v > SETTINGS_SAMPLE_MAX_S)
                ? "sample interval must be 15 s to 1 h" : NULL;
-}
-
-static const char *check_clock_n(uint16_t n)
-{
-    return (n < 1 || n > 1000) ? "clockn must be 1-1000" : NULL;
 }
 
 static const char *check_window(uint16_t start, uint16_t end)
@@ -143,11 +136,6 @@ static void load_saved(void)
     load_u32(h, K_SAMPLE, &s_cur.sample_s, check_sample);
     load_u32(h, K_LOWV, &s_cur.low_mv, check_low_mv);
 
-    uint16_t cn;
-    if (nvs_get_u16(h, K_CLOCKN, &cn) == ESP_OK && check_clock_n(cn) == NULL) {
-        s_cur.clock_n = cn;
-    }
-
     uint16_t ws, we;
     if (nvs_get_u16(h, K_WIN_START, &ws) == ESP_OK && nvs_get_u16(h, K_WIN_END, &we) == ESP_OK) {
         if (check_window(ws, we) == NULL) {
@@ -240,7 +228,6 @@ static const char *save_locked(void)
     if (err == ESP_OK) err = nvs_set_u32(h, K_LOWV, s_cur.low_mv);
     if (err == ESP_OK) err = nvs_set_u16(h, K_WIN_START, s_cur.window_start);
     if (err == ESP_OK) err = nvs_set_u16(h, K_WIN_END, s_cur.window_end);
-    if (err == ESP_OK) err = nvs_set_u16(h, K_CLOCKN, s_cur.clock_n);
     if (err == ESP_OK) err = nvs_set_str(h, K_HOST, s_cur.listener_host);
     if (err == ESP_OK) err = nvs_set_u16(h, K_PORT, s_cur.listener_port);
     if (err == ESP_OK) err = nvs_set_str(h, K_SSID, s_cur.wifi_ssid);
@@ -308,17 +295,6 @@ const char *settings_set_low_mv(uint32_t mv)
     if (bad) return bad;
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_cur.low_mv = mv;
-    const char *r = save_locked();
-    xSemaphoreGive(s_lock);
-    return r;
-}
-
-const char *settings_set_clock_n(uint16_t n)
-{
-    const char *bad = check_clock_n(n);
-    if (bad) return bad;
-    xSemaphoreTake(s_lock, portMAX_DELAY);
-    s_cur.clock_n = n;
     const char *r = save_locked();
     xSemaphoreGive(s_lock);
     return r;

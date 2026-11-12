@@ -11,8 +11,8 @@
 // hex digits>") and sends the same message
 // again every RETRY_S until it is acked, then the next. Events go ahead of
 // readings. Sampling carries on meanwhile; unsent messages wait in RAM.
-// The ack of message 6 of 6 of every Nth sample (and any ack while the clock
-// is unset) passes its logserv time and round trip to the clock.
+// Every ack goes to the clock (clock.c), which syncs the RTC to logserv time
+// on the first ack after boot and every 24 h after that.
 //
 // SD card (sd.c) and clock (clock.c) faults are hard faults (fault.c):
 // sampling stops, and the fault goes to the listener as an event
@@ -117,8 +117,6 @@ static uint16_t crc16(const char *p, size_t len)
     return ~esp_rom_crc16_be((uint16_t)~0x0000, (const uint8_t *)p, len);
 }
 
-static uint32_t s_samples_acked;    // message 6 of 6 acks since boot
-
 // Send one message and wait for its ack. True if acked.
 static bool send_one(const settings_t *cfg, const char *msg, uint32_t seq)
 {
@@ -153,15 +151,7 @@ static bool send_one(const settings_t *cfg, const char *msg, uint32_t seq)
         ESP_LOGI(TAG, "sent: %s", msg);
     }
     record(PUSH_OK, seq, reply);
-    // The logserv time test: message 6 of 6 of every Nth sample, or any ack
-    // while the clock is unset (it sets the clock).
-    if (strncmp(msg, "data ", 5) == 0 && strstr(msg, ",bmp388,pressure_pa,") != NULL) {
-        if (++s_samples_acked % cfg->clock_n == 0) {
-            clock_on_ack(reply, rtt_us);
-        }
-    } else if (!clock_is_set()) {
-        clock_on_ack(reply, rtt_us);
-    }
+    clock_on_ack(reply, rtt_us, sent_us + rtt_us);
     return true;
 }
 
@@ -226,7 +216,6 @@ void app_main(void)
         settings_get(&cfg);
         int64_t now = esp_timer_get_time();
         int64_t check_due = last_check_us + (int64_t)cfg.sample_s * 1000000;
-        int64_t clock_due = clock_next_due_us();
 
         if (now >= check_due) {
             if (!fault_get(NULL, NULL) && clock_is_set()) {
@@ -239,10 +228,6 @@ void app_main(void)
                 sd_check();
             }
             last_check_us = now;
-            continue;
-        }
-        if (now >= clock_due) {
-            clock_poll();
             continue;
         }
         bool waiting = datalog_next(msg);
@@ -266,10 +251,10 @@ void app_main(void)
         s_next_due_us = waiting ? retry_due : 0;
         portEXIT_CRITICAL(&s_stats_mux);
 
-        // Sleep until the next sample, clock poll or retry, or until woken
+        // Sleep until the next sample or retry, or until woken
         // (a new message, a setting changed). +1 tick so we never
         // wake just short of due.
-        int64_t next = check_due < clock_due ? check_due : clock_due;
+        int64_t next = check_due;
         if (waiting && retry_due < next) {
             next = retry_due;
         }

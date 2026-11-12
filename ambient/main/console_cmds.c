@@ -255,22 +255,22 @@ static int cmd_status(int argc, char **argv)
     } else {
         char now[40];
         clock_now_str(now, sizeof now);
-        printf("clock      %s, DS3231 synced %lld s ago", now,
-               (long long)(esp_timer_get_time() / 1000000 - ck.last_sync_up_s));
-        if (ck.n_offsets > 0) {
-            printf(", round trip %ld ms", (long)ck.ack_rtt_ms);
-        }
-        if (ck.correction_up_s >= 0) {
-            printf(", DS3231 corrected %+ld ms at uptime %lld s", (long)ck.correction_ms,
-                   (long long)ck.correction_up_s);
+        printf("clock      %s", now);
+        if (ck.last_sync_up_s >= 0) {
+            printf(", synced to logserv %lld s ago",
+                   (long long)(esp_timer_get_time() / 1000000 - ck.last_sync_up_s));
+        } else {
+            printf(", not synced to logserv yet");
         }
         printf("\n");
-        printf("offsets    logserv minus ESP32, last %d tests, oldest first, every %u samples:",
-               ck.n_offsets, cfg.clock_n);
-        for (int i = 0; i < ck.n_offsets; i++) {
-            printf(" %+ld", (long)ck.offsets_ms[i]);
+        printf("syncs      logserv minus RTC before each sync, last %d, oldest first:", ck.n_syncs);
+        for (int i = 0; i < ck.n_syncs; i++) {
+            time_t sec = (time_t)ck.syncs[i].utc_s;
+            struct tm t;
+            gmtime_r(&sec, &t);
+            printf("%s %02d-%02d %+ld ms", i ? "," : "", t.tm_mon + 1, t.tm_mday, (long)ck.syncs[i].diff_ms);
         }
-        printf(" ms\n");
+        printf("\n");
     }
 
     if (wifi_is_connected()) {
@@ -372,7 +372,6 @@ static void config_print(void)
     printf("window     %02u:%02u-%02u:%02u UTC   (not used yet)\n",
            cfg.window_start / 60, cfg.window_start % 60, cfg.window_end / 60, cfg.window_end % 60);
     print_listener(&cfg);
-    printf("clockn     %u   (logserv time test every N samples)\n", cfg.clock_n);
     printf("lowv       %lu.%02lu V   (supply-low threshold)\n", (unsigned long)(cfg.low_mv / 1000),
            (unsigned long)(cfg.low_mv % 1000 / 10));
     if (cfg.wifi_ssid[0] == '\0') {
@@ -387,7 +386,6 @@ static int config_usage(void)
     printf("usage:\n"
            "  config get\n"
            "  config interval <sample>      e.g. 2m; units s, m or h, bare number = seconds; 15 s-1 h\n"
-           "  config clockn <N>             logserv time test every N samples (1-1000)\n"
            "  config window <HH:MM> <HH:MM> send window in UTC; end before start wraps midnight\n"
            "  config listener <ip> <port>   where to send\n"
            "  config lowv <volts>           supply-low threshold, e.g. 4.6 (3.0-5.5 V)\n"
@@ -415,14 +413,6 @@ static int cmd_config(int argc, char **argv)
         int rc = report(settings_set_interval(sample));
         ambient_wake();               // re-plan the next sample with the new interval
         return rc;
-    }
-    if (strcmp(what, "clockn") == 0 && argc == 3) {
-        uint32_t n;
-        if (!parse_u32(argv[2], &n) || n < 1 || n > 1000) {
-            printf("clockn must be 1-1000\n");
-            return 1;
-        }
-        return report(settings_set_clock_n((uint16_t)n));
     }
     if (strcmp(what, "window") == 0 && argc == 4) {
         uint16_t a, b;
@@ -527,7 +517,7 @@ int console_start(void)
         { .command = "status", .help = "Running time, clock, WiFi, sends, sensors, SD card", .func = cmd_status },
         { .command = "info",   .help = "Firmware version, build date, MAC address",  .func = cmd_info },
         { .command = "config", .help = "Show or change settings; 'config' alone lists the forms",
-          .hint = "get | interval | window | clock | listener | lowv | wifi ...", .func = cmd_config },
+          .hint = "get | interval | window | listener | lowv | wifi ...", .func = cmd_config },
         { .command = "read",   .help = "Read the sensors now and print the readings", .func = cmd_read },
         { .command = "tail",   .help = "Last lines of a file on the SD card; alone, list the card's files",
           .hint = "[file [lines]]", .func = cmd_tail },

@@ -530,6 +530,14 @@ General guidance, untested here.
 - Never coat the SHT45's sensor opening or its PTFE membrane: it blocks the air and ruins the readings.
 - The SHT45 header sees humidity and possible condensation under the hood. Soldering the breakout straight to the perfboard avoids that, at the cost of easy swapping. The ADS1115 box's contacts see less direct air.
 
+### Lessons: calibration and the BMP388
+
+Observations from the build (2026-11-12). LLM advice had made two accuracy steps seem important. Neither weighed the improvement against the error that was left, or against cheaper alternatives that were easy to get.
+
+- **3-point thermistor calibration.** Quality thermistors made to a standard R-T curve, used as is, would have been enough.
+- **BMP388 for the boiling-point reference.** The BMP388 was added to measure local pressure for a boiling-water calibration point. Boiling point moves about 0.028 °C per hPa near 1013 hPa. Two comparisons with the KRDU METAR (`logger-server/bmp_vs_krdu.py`) read +0.53 and +0.46 hPa, within the BMP388's ±0.5 hPa absolute accuracy: about 0.014 °C. KRDU's altimeter setting, converted to station pressure at the sensor's elevation, would serve just as well, so the BMP388 adds little value to this project.
+- **Rule:** before adding an accuracy step, state how much error it removes, how much remains, and what cheaper option gets close.
+
 ### SHT45 heater
 
 - It clears condensation that leaves humidity stuck near 100%. It stays off unless firmware sends the heater command, and none does yet.

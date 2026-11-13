@@ -476,9 +476,8 @@ Each breakout adds its own pull-ups, so check the idle levels on the scan after 
 
 ## Open items
 
-- **Mounting heights:** the ADS1115 box and the sensor hood are built; the heights aren't recorded here.
-- **Firmware for GPIO25:** only `switch-probe` and `ads1115-probe` drive the switch, `ambient` doesn't yet. The logic is inverted: drive GPIO25 low to energize, high otherwise.
-- **Merging the boxes:** the bench noise test in "Why the ADS1115 box is separate" did show a wider spread under load (Table 19a), so its condition for merging isn't met. The increase is small, and it is well below the thermistor's tolerance, so the boxes can stay separate as built.
+- **Solar power:** the planned production supply is solar panel → battery → buck converter → 5 V DC → 2.5 mm barrel jack, replacing the mains supply (120 V AC → wall wart → buck converter). See [Power](#power), Table 5.
+- **Warm box elevation:** the warm box (with the BMP388) is at 92.56 m now (ground 289.1 ft + 175 in). Its height will change at the production location; record the new elevation and update `ELEV_M` in `logger-server/bmp_vs_krdu.py`.
 
 ## Conditions to monitor
 

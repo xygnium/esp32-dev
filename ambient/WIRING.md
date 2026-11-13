@@ -91,8 +91,10 @@ There are no more colors, so orange and yellow are reused. 30 AWG wire is too th
 | Mode | Source |
 |---|---|
 | Development | USB |
-| Production | 2.5 mm barrel jack |
+| Production (now) | 120 V AC → wall wart → buck converter → 5 V DC → 2.5 mm barrel jack |
+| Production (planned) | solar panel → battery → buck converter → 5 V DC → 2.5 mm barrel jack |
 
+- **Mains first, then solar.** The mains supply is a precursor to the solar one. From the buck converter on, both are the same, so only the source ahead of the converter changes.
 - **5 V bus:** joins the ESP32's VIN pin, the barrel jack's 5 V and the 3.3 V regulator's input. On USB, the ESP32 board's USB 5 V reaches the bus through VIN. The board has no diode between USB 5 V and VIN (checked), so the bus gets the full USB voltage. In production the jack feeds the bus, and so VIN. The regulator runs in both modes, so the 3.3 V bus comes up and goes down with the ESP32.
 - **3.3 V bus:** the regulator's output. It feeds every I2C device, the SD board and the 2-pin header. It is not connected to the ESP32's 3V3 pin. The regulator's ground is common with the ESP32's.
 - **One source at a time.** The user is responsible for never connecting USB and the barrel jack together. With no diode, the jack would feed back into the USB port.

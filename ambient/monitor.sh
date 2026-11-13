@@ -6,4 +6,4 @@ if [ $# -ne 0 ]; then
 fi
 export IDF_TOOLS_PATH=$HOME/dev/esp32/tools
 source $HOME/dev/esp32/esp-idf/export.sh
-idf.py -p /dev/ttyUSB0 monitor
+idf.py -p /dev/ttyUSB1 monitor

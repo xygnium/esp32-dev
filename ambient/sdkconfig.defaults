@@ -11,3 +11,9 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 # Main loop stack: sampling, float formatting and FatFs writes (datalog.c).
 # The default 3584 is too tight; `status` shows the headroom.
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
+# Console (log and command prompt) on UART1: TX G27, RX G26, to a 3.3 V USB-serial adapter.
+CONFIG_ESP_CONSOLE_UART_CUSTOM=y
+CONFIG_ESP_CONSOLE_UART_CUSTOM_NUM_1=y
+CONFIG_ESP_CONSOLE_UART_TX_GPIO=27
+CONFIG_ESP_CONSOLE_UART_RX_GPIO=26
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200

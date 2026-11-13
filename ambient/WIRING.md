@@ -45,6 +45,8 @@ The apparatus sits under an open-air shed roof, which stays dry in heavy rain. I
 | 4 | SD CS | SD board |
 | 32, 33 | I2C bus 1 SDA, SCL | nothing connected, not on the headers |
 | 34 | Supply voltage sense (`ambient`) | |
+| 27 | Console UART1 TX | USB-serial adapter RXD |
+| 26 | Console UART1 RX | USB-serial adapter TXD |
 
 Bus 0 runs at 100 kHz. The breakout boards' own pull-ups carry the bus; the ESP32's internal pull-ups are also enabled (from `i2c-scan/main/main.c`), but they are too weak to run the cables on their own.
 
@@ -148,6 +150,22 @@ The chip is marked DS3232SN: the DS3231 with 236 bytes of SRAM added, same regis
 - These are the ESP32's standard VSPI pins, with CS moved off GPIO5 because GPIO5 is a boot-strapping pin.
 - The board has its own pull-ups: four parts marked 103 (10 kΩ) and two brown capacitors of unknown value. It needs nothing added. The same regulator and SD board run together in two Pico projects with no problems so far.
 - If the card fails to initialise, check the supply first, then the wiring against Table 8.
+
+### Console adapter (USB-serial, CH340)
+
+**Table 8a: Console adapter connections**
+
+| Adapter pin | Goes to |
+|---|---|
+| TXD | D26 (GPIO26), UART1 RX |
+| RXD | D27 (GPIO27), UART1 TX |
+| GND | GND |
+| VCC, 3V3, 5V | jumper across VCC and 3V3 (sets 3.3 V logic); nothing to the ESP32 |
+
+- The console (log and command prompt) is on UART1 at 115200 8N1 (`sdkconfig.defaults`). The adapter is `/dev/ttyUSB1` on the PC; `./monitor.sh` opens it.
+- The ESP32's own USB port (`/dev/ttyUSB0`) still flashes the board, but shows only the ROM's first boot lines.
+- The jumper must be on 3V3: at 5 V the adapter's TXD would exceed what GPIO26 can take.
+- DTR and RTS aren't wired, so opening the monitor doesn't reset the board.
 
 ### Headers
 

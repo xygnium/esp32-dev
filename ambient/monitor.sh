@@ -4,6 +4,13 @@ if [ $# -ne 0 ]; then
     echo "usage: $0   (takes no options)" >&2
     exit 1
 fi
+ports=(/dev/ttyUSB*)
+if [ ! -e "${ports[0]}" ]; then
+    echo "no /dev/ttyUSB* found" >&2
+    exit 1
+fi
+port=${ports[-1]}
+echo "monitor on $port"
 export IDF_TOOLS_PATH=$HOME/dev/esp32/tools
 source $HOME/dev/esp32/esp-idf/export.sh
-idf.py -p /dev/ttyUSB1 monitor
+idf.py -p "$port" monitor

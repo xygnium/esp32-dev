@@ -6,13 +6,7 @@ The reading scheme (ratiometric, pulsed excitation on GPIO25, A0 for the excitat
 
 ## Where the noise comes from
 
-The ADS1115 is delta-sigma with a digital filter. At low data rates (8 to 128 SPS) it rejects energy far above its passband, so 2.4 GHz rarely corrupts the signal directly. The mechanisms that matter:
-
-- **RF rectification** in the input ESD diodes or front end, which gives a DC offset.
-- **Supply and ground disturbance** from WiFi transmit bursts (about 200 to 400 mA), which causes rail droop and ground bounce.
-- **Long sensor leads** acting as antennas.
-
-The firmware can't time conversions around WiFi activity: beacon wakes and delayed transmits happen on their own. The effect is expected to be far below the thermistor's ±0.5 °C tolerance. The bench test in "Why the ADS1115 box is separate" in WIRING.md measures the effect.
+The firmware can't time conversions around WiFi activity: beacon wakes and delayed transmits happen on their own. What the noise is and how it was measured are in WIRING.md ("Why the ADS1115 box is separate" and Table 19a).
 
 ## Sampling
 
@@ -24,7 +18,7 @@ The firmware can't time conversions around WiFi activity: beacon wakes and delay
 | Mode | Single-shot | The firmware chooses when each conversion runs |
 | Readings | One set per reading: A0, A1, A0 | The excitation is on for about 0.4 s at 8 SPS, which heats the thermistor about 0.006 °C. Sets back to back keep heating it (about 0.03 °C for five), so if more readings are ever wanted, space the sets about 15 s apart |
 | Order | Energize, wait, convert A0, A1, A0, de-energize, publish | |
-| Excitation | GPIO25 low (switch on) from about 20 ms before the first conversion until the last conversion ends | The inputs climb to their final voltage through the filters: A1 takes about 7 ms at 25 °C and 11 ms at −20 °C to settle within one ADC step. A0 is driven directly by the switch and settles in microseconds. A conversion started at switch-on averages the climb in, so if A1 were converted first the error would be about +0.2 °C at 25 °C and +1.4 °C at −20 °C. With the A0, A1, A0 order A1 starts long after it has settled, so the wait is a margin that costs nothing. The 20 ms figure is from `ads1115-dev/DESIGN.md`, still to be confirmed on the bench |
+| Excitation | GPIO25 low (switch on) from 30 ms before the first conversion until the last conversion ends (`EXCITE_WAIT_MS`; at the 100 Hz tick rate that gives at least 20 ms) | The inputs climb to their final voltage through the filters: A1 takes about 7 ms at 25 °C and 11 ms at −20 °C to settle within one ADC step. A0 is driven directly by the switch and settles in microseconds. A conversion started at switch-on averages the climb in, so if A1 were converted first the error would be about +0.2 °C at 25 °C and +1.4 °C at −20 °C. With the A0, A1, A0 order A1 starts long after it has settled, so the wait is a margin that costs nothing and needs no bench check |
 
 ## WiFi power
 
@@ -34,20 +28,6 @@ The firmware can't time conversions around WiFi activity: beacon wakes and delay
 |---|---|---|
 | Power-save (`WIFI_PS_MIN_MODEM`) | Stays associated and wakes at each DTIM beacon; the AP buffers packets; IP and DHCP lease survive | On (the ESP-IDF default), except during each message exchange (below). Needed for the solar/battery version |
 | Power-save off for each exchange | `main.c` turns power save off before sending a message and back on after the ack or the 2 s timeout | In use. With power save on, the router holds the ack until the next beacon (up to about 100 ms), so the round trip is lopsided and the logserv time is up to about 50 ms wrong: enough to correct the DS3231 wrongly (seen 2026-11-08: −55 ms, then +51 ms). With it off the round trip was 11 ms |
-| Radio off (`esp_wifi_stop()`) | Sockets die; reconnecting takes about 1 to 3 s with DHCP (a static IP is faster) | Only for sample intervals of minutes or more; not needed for EMI |
-
-## Remote commands
-
-The logger only sends: it sends to the collector and waits for the ack on the same socket, and never listens on a port of its own. Settings change only over the serial console. If remote control is wanted, there are two ways to add it.
-
-**Table 3: Remote command options (proposed, not decided)**
-
-| Option | Gains | Costs |
-|---|---|---|
-| Logger listens on a UDP port | Commands and on-demand readings at any time, within about a beacon interval | An open port: anyone on the LAN can send, and UDP senders are easy to fake, so settings changes need a shared-secret check. The collector must know the logger's IP (DHCP reservation, or learn it from the messages). A receive task, a command parser (reusing the console commands) and replies with retries. Rules out turning the radio off between messages |
-| Commands carried in the ack | No open port and no IPs to track; only the collector can send commands. Little firmware: parse the ack | A command waits for the next message, up to one sample interval |
-
-Recommended: commands in the ack, unless replies within seconds are needed.
 
 ## SD card and hard faults
 
@@ -77,7 +57,6 @@ Recommended: commands in the ack, unless replies within seconds are needed.
   3. It waits until true time reaches the next whole second and writes the DS3231. Writing the seconds register restarts its 1 s countdown (datasheet).
   4. It sets the ESP32 clock from the DS3231, as at boot.
 - **Sync record:** `status` shows the diff of the last 10 syncs with their dates, oldest first (`syncs` line). They're kept in NVS, so they survive a reboot. A reboot adds a sync, so the 10 aren't always a day apart.
-- **`age [n]`:** shows or sets the DS3231's aging register (about 0.1 ppm a step; the backup battery keeps it).
 - **Faults** (hard faults, as for the SD card, sent as the event `rtc,fault,<reason>`):
   - `missing`: the DS3231 doesn't answer at boot.
   - `invalid`: its oscillator-stop flag is set (it lost all power, so its time can't be trusted) and the card has data on it.
@@ -85,16 +64,24 @@ Recommended: commands in the ack, unless replies within seconds are needed.
   - Acks never clear a fault.
 - **Remediation** for a failed clock: replace the board or battery, reformat the card on a PC, and restart. With the flag set and an empty card, the logger treats the restart as remediated: the clock is unset, `status` shows `clock  not set (waiting for ack)`, and the logger sends a `clock,unset` event, resent every 10 s until acked. That ack sets the DS3231, then the flag is cleared and the ESP32 synced. Sampling starts once the clock is set. Data from before a detected fault isn't used.
 
+### Aging correction
+
+`age [n]` shows or sets the DS3231's aging register. Negative values speed the clock up. The backup battery keeps the value, and a new value takes effect at the DS3231's next temperature conversion, within 64 s.
+
+- **ppm rule:** any unitless ratio a/b can be given in ppm as a/b × 10⁶. a and b must be in the same unit, so the units cancel. Back the other way: ratio = ppm ÷ 10⁶.
+- **Measured (2026-11-24):** a sync's diff is logserv minus DS3231, so a positive diff means the DS3231 is slow. The daily diffs at −18 were +41, +32, +28 ms: mean (41 + 32 + 28) ÷ 3 = +33.7 ms a day, slow. At −22 they are −9, −6, −6, −10, +0 ms: mean −31 ÷ 5 = −6.2 ms a day, fast. The change is 33.7 − (−6.2) = 39.9 ms a day: 0.0399 s ÷ 86 400 s × 10⁶ = 0.46 ppm, over 4 steps = 0.115 ppm a step (the datasheet gives about 0.1, typical at 25 °C).
+- **Re-trim:** steps = mean daily diff in s ÷ 86 400 s × 10⁶ ÷ 0.115 ppm a step. A positive diff (slow) lowers `age` by that many steps; a negative one (fast) raises it. Now: −0.0062 s ÷ 86 400 s × 10⁶ = −0.072 ppm ÷ 0.115 = −0.6 steps, so −21 would leave about 0.115 − 0.072 = 0.043 ppm slow: 0.043 ÷ 10⁶ × 86 400 s = 3.7 ms a day. A gain of about 2 ms a day, below a sync's ±6 ms, so −22 stays.
+- **Status:** −22 since 2026-11-18, an acceptable result for now. Not a pass or fail: the rate shifts with temperature and the crystal's aging, so the `syncs` diffs need watching continuously (see [Open items](#open-items)).
+
 ## Sensors
 
 - **Code:** ported from the probes that ran on this hardware. The thermistor (`thermistor.c`) comes from `ads1115-probe`, not the shared `ads1115_core` library. The SHT45 (`sht45.c`) and the BMP388 (`bmp388.c`) come from `sensor-probe`. The probes stay as diagnostics.
 - **Sample:** every sample interval, while the clock is set and there is no hard fault. The order is the thermistor (about 0.42 s), the SHT45 straight after (so the two temperatures are close in time), then the BMP388. The first sample is one sample interval after boot. At boot GPIO25 is driven high (excitation off) before anything else.
-- **Time stamps:** each reading gets its own UTC stamp with milliseconds, taken when its measurement finishes. A sensor's values share its stamp.
 - **Thermistor:** Table 1. The ratio is A1 over the mean of the two A0 readings. The resistance is corrected for the ADC input (4.3 MΩ), then converted with Steinhart-Hart and the generic coefficients (WIRING.md). The probe's "A0 near 0 V when off" check is left out: it costs a 0.13 s conversion each sample and stays in `ads1115-probe`.
 - **BMP388:** soft reset and calibration at the first reading, then one forced measurement per reading. After any failure the reset and calibration are redone, so a replaced chip comes back.
 - **A failed sensor is a soft failure:** the others carry on, and it is tried again at the next sample. The first failure, a change of reason and the recovery are logged. Hard faults (SD, RTC) are unchanged.
 
-**Table 4: Data types and failure reasons**
+**Table 3: Data types and failure reasons**
 
 | Sensor | data_type | Failure reasons |
 |---|---|---|
@@ -133,8 +120,6 @@ The ratio is kept so a later calibration of the thermistor can be applied to pas
   | ratio | 5 | One ADC step is about 0.00004; every step is kept for later recalibration |
   | pressure_pa | 1 | 0.1 Pa, about 1 cm of altitude |
 
-- **Deletes** a day file only once it's all sent and it isn't today's (see below). Never formats the card.
-
 ## Sending from the card
 
 Readings are sent to logserv from the card, one line at a time, each one acked before the next (`datalog.c`). No reading is lost while logserv or WiFi is down, or over a reboot: the backlog goes out when the link is back.
@@ -147,12 +132,9 @@ Readings are sent to logserv from the card, one line at a time, each one acked b
 - **No `sent.txt`** (a new card): every day file on the card is sent.
 - **Rate:** about 30 messages a second, so a day at 30 s (17,280 readings) takes about 10 min.
 - **`status`** shows how far sending has got: `sent to    2026-11-09.csv byte 671791`.
-- **Weak spots:** a power cut in the middle of a write can leave half a line, which the next write joins: that one row is refused by logserv (it's still acked, so sending carries on). Events not yet acked are lost on a reboot.
-
-Test 2026-11-09 (be883d5, sending from the card): a fresh logserv database, then the firmware flashed with no `sent.txt`. The whole card (11-07 to 11-09, 29,000 readings) reached the database at about 30 a second. After two reboots the resent lines all showed as `repeat` in logserv's output and none were stored twice. The gaps between samples in the database are only where the logger was off or rebooting (70 to 85 s per reboot).
-
-Test 2026-11-11 (d557c1e, events from RAM, delete when sent): card and logserv database emptied, firmware flashed at 15:06Z with logserv stopped. After logserv was started (15:08Z), the `boot d557c1e` and `clock set` events arrived from the RAM queue, and readings arrived (15:17Z sample, all `ok`). Not yet checked: `2026-11-11.csv` deleted after 00:00 UTC.
+- **Weak spots:** a power cut in the middle of a write can leave half a line, which the next write joins: that one row is refused by logserv (it's still acked, so sending carries on).
 
 ## Open items
 
-None.
+- **DS3231 rate:** watch the daily diffs in `syncs` (`status`) continuously; re-trim `age` if their mean drifts outside about ±6 ms a day (see [Aging correction](#aging-correction)).
+- **Remote commands (not decided):** the logger only sends and never listens; settings change only over the serial console. If remote control is wanted, carry commands in the ack: no open port and only the collector can send, but a command waits up to one sample interval. The other way, a UDP port on the logger, answers within about a beacon interval but is open to the whole LAN (needs a shared-secret check), needs the logger's IP, and rules out turning the radio off between messages.
